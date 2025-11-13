@@ -28,7 +28,6 @@ logger = logging.getLogger("rag")
 # -------- ENV --------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
-print(PINECONE_API_KEY)
 PINECONE_CLOUD = os.getenv("PINECONE_CLOUD", "aws")
 PINECONE_REGION = os.getenv("PINECONE_REGION", "us-east-1")
 DEFAULT_INDEX_NAME = os.getenv("PINECONE_INDEX", "rag-index")
@@ -136,27 +135,34 @@ def ensure_index(index_name: str, embedding_model: str):
 
     required_dim = EMBED_DIMS[embedding_model]
     existing = {idx["name"] for idx in pc.list_indexes()}
+
     if index_name in existing:
         desc = pc.describe_index(index_name)
+        actual_dim = None
         try:
             actual_dim = int(getattr(desc, "dimension"))
         except Exception:
             try:
                 actual_dim = int(desc.to_dict().get("dimension"))
             except Exception:
-                actual_dim = None
+                pass
 
         if actual_dim is not None and actual_dim != required_dim:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    f"Index '{index_name}' exists with dimension {actual_dim}, "
-                    f"but embedding model '{embedding_model}' requires {required_dim}."
-                ),
+            # Auto-migrate: delete + recreate (safe because you must re-embed anyway)
+            logger.warning(
+                f"Index '{index_name}' has dim {actual_dim}, but model '{embedding_model}' needs {required_dim}. "
+                f"Recreating index…"
             )
-        logger.info(f"Index '{index_name}' already exists and is compatible.")
+            pc.delete_index(index_name)
+            pc.create_index(
+                name=index_name,
+                dimension=required_dim,
+                metric="cosine",
+                spec=ServerlessSpec(cloud=PINECONE_CLOUD, region=PINECONE_REGION),
+            )
+            logger.info(f"Recreated index '{index_name}' with dim {required_dim}.")
     else:
-        logger.info(f"Creating index '{index_name}' with dim {required_dim}...")
+        logger.info(f"Creating index '{index_name}' with dim {required_dim}…")
         pc.create_index(
             name=index_name,
             dimension=required_dim,
@@ -164,8 +170,8 @@ def ensure_index(index_name: str, embedding_model: str):
             spec=ServerlessSpec(cloud=PINECONE_CLOUD, region=PINECONE_REGION),
         )
         logger.info(f"Index '{index_name}' created.")
-    return pc.Index(index_name), required_dim
 
+    return pc.Index(index_name), required_dim
 
 def extract_pdf_text_chunks(pdf_bytes: bytes,
                             max_tokens: int = 800,
