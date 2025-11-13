@@ -14,6 +14,8 @@ from pathlib import Path
 from fastapi.responses import HTMLResponse
 from openai import OpenAI
 from pinecone import Pinecone, ServerlessSpec
+from dotenv import load_dotenv
+load_dotenv()
 
 # ------------ LOGGING ------------
 logging.basicConfig(
