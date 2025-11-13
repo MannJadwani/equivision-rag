@@ -6,6 +6,7 @@ from typing import List, Dict, Any, Optional
 import time
 import logging
 import pdfplumber
+import httpx
 from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -26,14 +27,18 @@ logger = logging.getLogger("rag")
 
 # -------- ENV --------
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-print(OPENAI_API_KEY)
 PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
+print(PINECONE_API_KEY)
 PINECONE_CLOUD = os.getenv("PINECONE_CLOUD", "aws")
 PINECONE_REGION = os.getenv("PINECONE_REGION", "us-east-1")
 DEFAULT_INDEX_NAME = os.getenv("PINECONE_INDEX", "rag-index")
 
 DEFAULT_EMBED_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4.1-mini")
+DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
+
+# Strapi API Configuration
+STRAPI_API_URL = "https://admin.equivision.in/api/preset-questions"
+STRAPI_BEARER_TOKEN = "7c95c5c490694a382a102afa60f7df7d64922a7e840719b2cd5803706e9fabdad8bc508f39fcdfef30df399141818dbb65b4b6ae82ba7a1befbccf27fbc3864f45b2bda0417d597d4db28ef893be167e4c2c314a54a6a9b0b901ed2a8569a51e394f423d39735fc77f02ce721db19a30360558c11bff03bb7e25b877f2eea0f4"
 
 EMBED_DIMS = {
     "text-embedding-3-small": 1536,
@@ -98,6 +103,18 @@ class BatchQueryItem(BaseModel):
 
 class BatchQueryResponse(BaseModel):
     results: List[QueryResponse]
+
+class StrapiQuestion(BaseModel):
+    id: int
+    question: str
+    answer: Optional[str] = None
+
+class StrapiQuestionsResponse(BaseModel):
+    questions: List[StrapiQuestion]
+
+class StrapiAnswersResponse(BaseModel):
+    results: List[Dict[str, Any]]
+
 
 
 # ------------ UTILS ------------
@@ -403,7 +420,7 @@ async def batch_query(payload: List[BatchQueryItem]):
             chat = oa_client.chat.completions.create(
                 model=chat_model,
                 messages=[
-                    {"role": "system", "content": "You are a concise expert assistant."},
+                    {"role": "system", "content": "Answer strictly from the provided context. If the answer is not present, say you don't have enough information"},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.2,
@@ -453,6 +470,194 @@ def debug(index_name: str = DEFAULT_INDEX_NAME):
         "total_vectors": total,
         "test_query_matches": test_matches,
     }
+
+
+@app.get("/strapi/questions", response_model=StrapiQuestionsResponse)
+async def fetch_strapi_questions():
+    """
+    Fetch preset questions from Strapi API
+    """
+    logger.info("Fetching questions from Strapi API...")
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {
+                "Authorization": f"Bearer {STRAPI_BEARER_TOKEN}"
+            }
+            response = await client.get(STRAPI_API_URL, headers=headers, timeout=30.0)
+            response.raise_for_status()
+            
+            data = response.json()
+            # logger.info(f"Received data from Strapi: {data}")
+            
+            # Parse the Strapi response structure
+            questions = []
+            if isinstance(data, dict) and "data" in data:
+                for item in data["data"]:
+                    if isinstance(item, dict):
+                        attributes = item.get("attributes", {})
+                        questions.append(StrapiQuestion(
+                            id=item.get("id", 0),
+                            question=attributes.get("question", ""),
+                            answer=None
+                        ))
+            elif isinstance(data, list):
+                for idx, item in enumerate(data):
+                    if isinstance(item, dict):
+                        questions.append(StrapiQuestion(
+                            id=item.get("id", idx),
+                            question=item.get("question", ""),
+                            answer=None
+                        ))
+            
+            logger.info(f"Parsed {len(questions)} questions from Strapi")
+            return StrapiQuestionsResponse(questions=questions)
+            
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error fetching Strapi questions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch questions from Strapi: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error fetching Strapi questions: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+
+
+@app.post("/strapi/answer-questions", response_model=StrapiAnswersResponse)
+async def answer_strapi_questions(
+    index_name: str = Form(DEFAULT_INDEX_NAME),
+    embedding_model: str = Form(DEFAULT_EMBED_MODEL),
+    chat_model: str = Form(DEFAULT_CHAT_MODEL),
+    top_k: int = Form(6)
+):
+    """
+    Fetch questions from Strapi and generate answers using RAG
+    """
+    logger.info("Fetching questions from Strapi and generating answers...")
+
+    try:
+        async with httpx.AsyncClient() as client:
+            headers = {
+                "Authorization": f"Bearer {STRAPI_BEARER_TOKEN}"
+            }
+            response = await client.get(STRAPI_API_URL, headers=headers, timeout=30.0)
+            response.raise_for_status()
+
+            data = response.json()
+            raw_items = data.get("data", data)  # handle both {"data": [...]} and plain list
+            logger.info(f"Strapi raw items received: {len(raw_items) if isinstance(raw_items, list) else 0}")
+
+            questions = []
+
+            if isinstance(raw_items, list):
+                for idx, item in enumerate(raw_items):
+                    if not isinstance(item, dict):
+                        continue
+
+                    # 1) Strapi style: item["attributes"]["question"]
+                    attributes = item.get("attributes")
+                    if isinstance(attributes, dict) and attributes.get("question"):
+                        questions.append({
+                            "id": item.get("id", idx),
+                            "question": attributes.get("question")
+                        })
+                        continue
+
+                    # 2) Your current style: item["question"] at root
+                    if item.get("question"):
+                        questions.append({
+                            "id": item.get("id", idx),
+                            "question": item.get("question")
+                        })
+                        continue
+            else:
+                logger.warning("Strapi response not in expected list format")
+
+            if not questions:
+                logger.info("No questions found in Strapi response")
+                return StrapiAnswersResponse(results=[])
+
+            # Normalize inputs
+            index_name = index_name.strip() or DEFAULT_INDEX_NAME
+            embedding_model = normalize_embed_model(embedding_model)
+            chat_model = chat_model.strip() or DEFAULT_CHAT_MODEL
+
+            # ensure index
+            index, _ = ensure_index(index_name, embedding_model)
+
+            results = []
+            total_q = len(questions)
+            for idx, q_item in enumerate(questions, start=1):
+                question_text = q_item["question"]
+                question_id = q_item["id"]
+                print("question_text:", question_text)
+                logger.info(f"Processing question {idx}/{total_q}: '{question_text[:80]}'")
+
+                try:
+                    # embed question
+                    q_emb = oa_client.embeddings.create(
+                        model=embedding_model,
+                        input=[question_text]
+                    ).data[0].embedding
+
+                    # vector search
+                    matches = search(index, q_emb, top_k=top_k)
+
+                    if not matches:
+                        results.append({
+                            "id": question_id,
+                            "question": question_text,
+                            "answer": "I don't have enough information to answer from the knowledge base.",
+                            "sources": []
+                        })
+                        continue
+
+                    # build prompt
+                    prompt = build_prompt(question_text, matches)
+
+                    chat = oa_client.chat.completions.create(
+                        model=chat_model,
+                        messages=[
+                            {"role": "system", "content": "You are a concise expert assistant."},
+                            {"role": "user", "content": prompt}
+                        ],
+                        temperature=0.2,
+                    )
+                    answer = chat.choices[0].message.content.strip()
+
+                    sources = [
+                        {
+                            "id": m.get("id"),
+                            "page": m.get("page"),
+                            "score": m.get("score"),
+                            "doc_id": m.get("doc_id")
+                        }
+                        for m in matches
+                    ]
+
+                    results.append({
+                        "id": question_id,
+                        "question": question_text,
+                        "answer": answer,
+                        "sources": sources
+                    })
+
+                except Exception as e:
+                    logger.error(f"Error processing question {idx}: {e}")
+                    results.append({
+                        "id": question_id,
+                        "question": question_text,
+                        "answer": f"Error processing this question: {str(e)}",
+                        "sources": []
+                    })
+
+            logger.info(f"Completed processing {len(results)} questions")
+            return StrapiAnswersResponse(results=results)
+
+    except httpx.HTTPError as e:
+        logger.error(f"HTTP error fetching Strapi questions: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to fetch questions from Strapi: {str(e)}")
+    except Exception as e:
+        logger.error(f"Error in answer_strapi_questions: {e}")
+        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
 
 
 @app.get("/health")

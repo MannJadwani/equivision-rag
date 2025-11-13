@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RAG System - PDF Q&A</title>
+    <title>RAG - Retrieval Augmented Generation</title>
     <style>
         * {
             margin: 0;
@@ -13,338 +13,267 @@
 
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
-            color: #e2e8f0;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+            background-attachment: fixed;
             min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             padding: 20px;
+            position: relative;
+            overflow-x: hidden;
+        }
+
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: 50px 50px;
+            animation: moveGrid 20s linear infinite;
+            z-index: 0;
+        }
+
+        @keyframes moveGrid {
+            0% { transform: translate(0, 0); }
+            100% { transform: translate(50px, 50px); }
         }
 
         .container {
+            position: relative;
+            z-index: 1;
+            width: 100%;
             max-width: 1200px;
-            margin: 0 auto;
         }
 
         header {
-            margin-bottom: 40px;
             text-align: center;
+            margin-bottom: 40px;
+            animation: slideDown 0.8s ease-out;
         }
 
-        header h1 {
-            font-size: 2.5rem;
-            color: #60a5fa;
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-30px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        h1 {
+            font-size: 3.5em;
+            background: linear-gradient(135deg, #00d4ff, #7c3aed, #ff006e);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
             margin-bottom: 10px;
             font-weight: 700;
+            letter-spacing: -1px;
         }
 
-        header p {
-            font-size: 1.1rem;
-            color: #94a3b8;
+        .subtitle {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 1.1em;
+            font-weight: 300;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 20px;
+            padding: 40px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            transition: all 0.3s ease;
+        }
+
+        .glass:hover {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.2);
+            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.4);
         }
 
         .tabs {
             display: flex;
-            gap: 0;
-            margin-bottom: 30px;
-            border-bottom: 2px solid #334155;
+            gap: 10px;
+            margin-bottom: 40px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
         }
 
         .tab-btn {
-            padding: 15px 30px;
-            background: none;
+            padding: 12px 24px;
+            background: transparent;
             border: none;
-            border-bottom: 3px solid transparent;
-            color: #94a3b8;
-            font-size: 1rem;
-            font-weight: 600;
+            color: rgba(255, 255, 255, 0.6);
             cursor: pointer;
-            transition: all 0.3s ease;
+            font-size: 1em;
+            font-weight: 500;
+            position: relative;
+            transition: color 0.3s ease;
         }
 
         .tab-btn:hover {
-            color: #cbd5e1;
+            color: rgba(255, 255, 255, 0.9);
         }
 
         .tab-btn.active {
-            color: #60a5fa;
-            border-bottom-color: #60a5fa;
+            color: #00d4ff;
+        }
+
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            bottom: -1px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: linear-gradient(90deg, #00d4ff, #7c3aed);
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                width: 0;
+                left: 50%;
+            }
+            to {
+                width: 100%;
+                left: 0;
+            }
         }
 
         .tab-content {
             display: none;
+            animation: fadeIn 0.4s ease;
         }
 
         .tab-content.active {
             display: block;
         }
 
-        .main-grid {
-            display: grid;
-            grid-template-columns: 2fr 1fr;
-            gap: 30px;
-        }
-
-        @media (max-width: 768px) {
-            .main-grid {
-                grid-template-columns: 1fr;
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
             }
         }
 
-        .card {
-            background: #1e293b;
-            border: 1px solid #334155;
-            border-radius: 12px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        }
-
-        .card h2 {
-            font-size: 1.5rem;
-            color: #f1f5f9;
-            margin-bottom: 20px;
-        }
-
         .form-group {
-            margin-bottom: 20px;
+            margin-bottom: 24px;
         }
 
         label {
             display: block;
             margin-bottom: 8px;
-            color: #cbd5e1;
+            color: rgba(255, 255, 255, 0.8);
             font-weight: 500;
-            font-size: 0.95rem;
+            font-size: 0.95em;
         }
 
         input[type="text"],
         input[type="number"],
+        input[type="file"],
         select,
         textarea {
             width: 100%;
-            padding: 12px 15px;
-            background: #0f172a;
-            border: 1px solid #475569;
-            border-radius: 8px;
-            color: #e2e8f0;
-            font-size: 1rem;
-            font-family: inherit;
+            padding: 12px 16px;
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 12px;
+            color: rgba(255, 255, 255, 0.9);
+            font-size: 0.95em;
             transition: all 0.3s ease;
         }
 
         input[type="text"]:focus,
         input[type="number"]:focus,
+        input[type="file"]:focus,
         select:focus,
         textarea:focus {
             outline: none;
-            border-color: #60a5fa;
-            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
-            background: #0f172a;
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(0, 212, 255, 0.4);
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
         }
 
-        .file-drop {
-            border: 2px dashed #475569;
-            border-radius: 8px;
-            padding: 40px;
-            text-align: center;
+        input[type="file"] {
             cursor: pointer;
-            transition: all 0.3s ease;
-            background: rgba(15, 23, 42, 0.5);
         }
 
-        .file-drop:hover {
-            border-color: #60a5fa;
-            background: rgba(96, 165, 250, 0.05);
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+            font-family: inherit;
         }
 
-        .file-drop.dragover {
-            border-color: #60a5fa;
-            background: rgba(96, 165, 250, 0.1);
-        }
-
-        .file-drop input[type="file"] {
-            display: none;
-        }
-
-        .file-icon {
-            font-size: 3rem;
-            margin-bottom: 15px;
-        }
-
-        .file-drop p {
-            color: #94a3b8;
-            margin-bottom: 10px;
-        }
-
-        .file-name {
-            color: #60a5fa;
-            font-weight: 600;
-            margin-top: 15px;
+        .button-group {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
         }
 
         button {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            color: white;
-            padding: 12px 30px;
+            padding: 12px 28px;
             border: none;
-            border-radius: 8px;
-            font-size: 1rem;
+            border-radius: 12px;
+            font-size: 0.95em;
             font-weight: 600;
             cursor: pointer;
             transition: all 0.3s ease;
-            width: 100%;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
 
-        button:hover {
-            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
+        .btn-primary {
+            background: linear-gradient(135deg, #00d4ff, #7c3aed);
+            color: white;
+            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
+        }
+
+        .btn-primary:hover {
             transform: translateY(-2px);
-            box-shadow: 0 5px 20px rgba(37, 99, 235, 0.3);
+            box-shadow: 0 15px 40px rgba(0, 212, 255, 0.4);
         }
 
-        button:active {
+        .btn-primary:active {
             transform: translateY(0);
         }
 
-        button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
         .btn-secondary {
-            background: #475569;
-            margin-top: 10px;
+            background: rgba(255, 255, 255, 0.1);
+            color: rgba(255, 255, 255, 0.8);
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
 
         .btn-secondary:hover {
-            background: #64748b;
+            background: rgba(255, 255, 255, 0.15);
+            border-color: rgba(255, 255, 255, 0.3);
         }
 
-        .alert {
-            padding: 15px 20px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            display: none;
-            align-items: center;
-            gap: 15px;
-        }
-
-        .alert.show {
-            display: flex;
-        }
-
-        .alert.success {
-            background: rgba(34, 197, 94, 0.15);
-            border: 1px solid #22c55e;
-            color: #86efac;
-        }
-
-        .alert.error {
-            background: rgba(239, 68, 68, 0.15);
-            border: 1px solid #ef4444;
-            color: #fca5a5;
-        }
-
-        .alert-icon {
-            font-size: 1.5rem;
-            flex-shrink: 0;
-        }
-
-        .results {
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            padding: 20px;
-            margin-top: 20px;
-        }
-
-        .result-answer {
-            color: #e2e8f0;
-            line-height: 1.8;
-            margin-bottom: 20px;
-            font-size: 1.05rem;
-        }
-
-        .sources {
-            margin-top: 20px;
-        }
-
-        .sources h3 {
-            color: #60a5fa;
-            margin-bottom: 15px;
-            font-size: 1rem;
-        }
-
-        .source-item {
-            background: #1e293b;
-            padding: 12px 15px;
-            margin-bottom: 10px;
-            border-left: 3px solid #60a5fa;
-            border-radius: 4px;
-            font-size: 0.9rem;
-        }
-
-        .source-meta {
-            color: #94a3b8;
-            font-size: 0.85rem;
-            margin-top: 8px;
-        }
-
-        .settings-card {
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        .settings-card h3 {
-            color: #cbd5e1;
-            margin-bottom: 15px;
-            font-size: 1rem;
-        }
-
-        .history-item {
-            background: #1e293b;
-            border-left: 3px solid #60a5fa;
-            padding: 15px;
-            margin-bottom: 15px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-
-        .history-item:hover {
-            background: #334155;
-            border-left-color: #3b82f6;
-        }
-
-        .history-query {
-            color: #60a5fa;
-            font-weight: 600;
-            margin-bottom: 5px;
-        }
-
-        .history-time {
-            color: #64748b;
-            font-size: 0.8rem;
-        }
-
-        .loader {
+        .loading {
             display: none;
             text-align: center;
             margin: 20px 0;
         }
 
-        .loader.show {
-            display: block;
-        }
-
         .spinner {
-            border: 3px solid #334155;
-            border-top: 3px solid #60a5fa;
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            border-top: 3px solid #00d4ff;
             border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 0.8s linear infinite;
-            margin: 0 auto;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
         }
 
         @keyframes spin {
@@ -352,202 +281,350 @@
             100% { transform: rotate(360deg); }
         }
 
-        .text-muted {
-            color: #94a3b8;
-            font-size: 0.9rem;
+        .status-message {
+            padding: 16px;
+            border-radius: 12px;
+            margin-top: 20px;
+            display: none;
+            animation: slideIn 0.3s ease;
         }
 
-        .batch-queries {
-            background: #0f172a;
-            border: 1px solid #334155;
-            border-radius: 8px;
-            padding: 15px;
-            margin-top: 15px;
-            max-height: 300px;
-            overflow-y: auto;
+        .status-message.show {
+            display: block;
         }
 
-        .batch-item {
-            background: #1e293b;
-            padding: 10px;
-            margin-bottom: 10px;
-            border-radius: 4px;
-            border-left: 2px solid #60a5fa;
+        .status-message.success {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #10b981;
         }
 
-        .batch-item-remove {
-            background: #ef4444;
-            color: white;
-            padding: 4px 8px;
-            border: none;
-            border-radius: 4px;
-            font-size: 0.8rem;
-            width: auto;
-            margin-top: 8px;
-            cursor: pointer;
+        .status-message.error {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #ef4444;
         }
 
-        .batch-item-remove:hover {
-            background: #dc2626;
+        .status-message.info {
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #3b82f6;
+        }
+
+        .response-container {
+            margin-top: 30px;
+            display: none;
+        }
+
+        .response-container.show {
+            display: block;
+            animation: slideUp 0.5s ease;
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .response-card {
+            background: rgba(255, 255, 255, 0.07);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 16px;
+            padding: 24px;
+            margin-bottom: 20px;
+        }
+
+        .response-title {
+            color: #00d4ff;
+            font-size: 1.1em;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .response-text {
+            color: rgba(255, 255, 255, 0.85);
+            line-height: 1.6;
+            margin-bottom: 16px;
+        }
+
+        .sources {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .sources-title {
+            color: rgba(255, 255, 255, 0.7);
+            font-size: 0.9em;
+            font-weight: 600;
+            margin-bottom: 12px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .source-item {
+            background: rgba(0, 212, 255, 0.05);
+            border-left: 3px solid #00d4ff;
+            padding: 12px;
+            margin-bottom: 8px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            color: rgba(255, 255, 255, 0.75);
+        }
+
+        .source-item strong {
+            color: #00d4ff;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .stats-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 16px;
+            padding: 24px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .stats-card:hover {
+            background: rgba(255, 255, 255, 0.06);
+            border-color: rgba(255, 255, 255, 0.15);
+        }
+
+        .stats-number {
+            font-size: 2.5em;
+            background: linear-gradient(135deg, #00d4ff, #7c3aed);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-weight: 700;
+            margin-bottom: 8px;
+        }
+
+        .stats-label {
+            color: rgba(255, 255, 255, 0.6);
+            font-size: 0.9em;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        @media (max-width: 768px) {
+            h1 {
+                font-size: 2.5em;
+            }
+
+            .glass {
+                padding: 24px;
+            }
+
+            .tabs {
+                flex-wrap: wrap;
+            }
+
+            .button-group {
+                flex-direction: column;
+            }
+
+            button {
+                width: 100%;
+            }
         }
     </style>
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
         <header>
-            <h1>⚡ RAG System</h1>
-            <p>Upload PDFs and ask intelligent questions powered by embeddings</p>
+            <h1>🧠 RAG System</h1>
+            <p class="subtitle">Retrieval Augmented Generation powered by AI</p>
         </header>
 
-        <!-- Tabs -->
-        <div class="tabs">
-            <button class="tab-btn active" data-tab="ingest">📄 Ingest PDF</button>
-            <button class="tab-btn" data-tab="query">❓ Query</button>
-            <button class="tab-btn" data-tab="batch">📦 Batch Query</button>
-        </div>
+        <div class="glass">
+            <div class="tabs">
+                <button class="tab-btn active" data-tab="ingest">Upload Document</button>
+                <button class="tab-btn" data-tab="query">Ask Questions</button>
+                <button class="tab-btn" data-tab="strapi">Strapi Questions</button>
+                <button class="tab-btn" data-tab="debug">System Status</button>
+            </div>
 
-        <!-- Main Content -->
-        <div class="main-grid">
-            <!-- Ingest Tab -->
+            <!-- INGEST TAB -->
             <div id="ingest" class="tab-content active">
-                <div class="card">
-                    <h2>Upload & Ingest PDF</h2>
-
-                    <div id="ingestAlert" class="alert"></div>
-
-                    <div class="file-drop" id="fileDrop">
-                        <div class="file-icon">📁</div>
-                        <p>Drag and drop your PDF here</p>
-                        <p class="text-muted">or click to browse</p>
-                        <input type="file" id="fileInput" accept=".pdf" />
-                        <div id="fileName" class="file-name"></div>
-                    </div>
-
-                    <!-- <div class="form-group" style="margin-top: 20px;">
-                        <label>Index Name</label>
-                        <input type="text" id="ingestIndexName" value="rag-index" />
+                <h2 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 24px;">Upload PDF Document</h2>
+                <form id="ingestForm">
+                    <div class="form-group">
+                        <label for="pdfFile">PDF File *</label>
+                        <input type="file" id="pdfFile" accept=".pdf" required>
                     </div>
 
                     <div class="form-group">
-                        <label>Embedding Model</label>
-                        <select id="ingestEmbedModel">
-                            <option value="text-embedding-3-small">text-embedding-3-small</option>
-                            <option value="text-embedding-3-large">text-embedding-3-large</option>
-                            <option value="small">small</option>
-                            <option value="large">large</option>
+                        <label for="indexName">Index Name</label>
+                        <input type="text" id="indexName" placeholder="rag-index" value="rag-index">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="embeddingModel">Embedding Model</label>
+                        <select id="embeddingModel">
+                            <option value="text-embedding-3-small">Small (Fast)</option>
+                            <option value="text-embedding-3-large">Large (Accurate)</option>
                         </select>
-                    </div> -->
+                    </div>
 
-                    <button id="ingestBtn" onclick="handleIngest()">Upload & Ingest</button>
-                </div>
+                    <div class="button-group">
+                        <button type="submit" class="btn-primary">Upload & Index</button>
+                        <button type="reset" class="btn-secondary">Clear</button>
+                    </div>
+
+                    <div class="loading" id="ingestLoading">
+                        <div class="spinner"></div>
+                        <p style="color: rgba(255, 255, 255, 0.7);">Processing your PDF...</p>
+                    </div>
+
+                    <div class="status-message" id="ingestStatus"></div>
+
+                    <div class="response-container" id="ingestResponse">
+                        <div class="response-card">
+                            <div class="response-title">✓ Upload Successful</div>
+                            <div class="response-text">
+                                <p><strong>Document ID:</strong> <span id="docId"></span></p>
+                                <p><strong>Chunks Created:</strong> <span id="chunksCount"></span></p>
+                                <p><strong>Embedding Model:</strong> <span id="modelUsed"></span></p>
+                                <p><strong>Dimension:</strong> <span id="dimension"></span></p>
+                            </div>
+                        </div>
+                    </div>
+                </form>
             </div>
 
-            <!-- Query Tab -->
+            <!-- QUERY TAB -->
             <div id="query" class="tab-content">
-                <div class="card">
-                    <h2>Ask Questions</h2>
-
-                    <div id="queryAlert" class="alert"></div>
+                <h2 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 24px;">Query Your Knowledge Base</h2>
+                <form id="queryForm">
+                    <div class="form-group">
+                        <label for="queryText">Question *</label>
+                        <textarea id="queryText" placeholder="What would you like to know?" required></textarea>
+                    </div>
 
                     <div class="form-group">
-                        <label>Your Question</label>
-                        <textarea id="queryInput" rows="5" placeholder="What is...?"></textarea>
+                        <label for="topK">Top Results</label>
+                        <input type="number" id="topK" min="1" max="50" value="6">
                     </div>
 
-                    <button id="queryBtn" onclick="handleQuery()">Search & Answer</button>
+                    <div class="form-group">
+                        <label for="queryIndexName">Index Name</label>
+                        <input type="text" id="queryIndexName" placeholder="rag-index" value="rag-index">
+                    </div>
 
-                    <div id="queryLoader" class="loader">
+                    <div class="button-group">
+                        <button type="submit" class="btn-primary">Search & Generate Answer</button>
+                        <button type="reset" class="btn-secondary">Clear</button>
+                    </div>
+
+                    <div class="loading" id="queryLoading">
                         <div class="spinner"></div>
-                        <p style="margin-top: 10px; color: #94a3b8;">Processing...</p>
+                        <p style="color: rgba(255, 255, 255, 0.7);">Finding answers...</p>
                     </div>
 
-                    <div id="results" class="results" style="display: none;">
-                        <h3 style="color: #60a5fa; margin-bottom: 15px;">📋 Answer</h3>
-                        <div id="resultAnswer" class="result-answer"></div>
-                        <div id="resultSources" class="sources"></div>
+                    <div class="status-message" id="queryStatus"></div>
+
+                    <div class="response-container" id="queryResponse">
+                        <div class="response-card">
+                            <div class="response-title">Answer</div>
+                            <div class="response-text" id="answerText"></div>
+
+                            <div class="sources" id="sourcesContainer">
+                                <div class="sources-title">📚 Sources</div>
+                                <div id="sourcesList"></div>
+                            </div>
+                        </div>
                     </div>
+                </form>
+            </div>
+
+            <!-- STRAPI TAB -->
+            <div id="strapi" class="tab-content">
+                <h2 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 24px;">Strapi Preset Questions</h2>
+                
+                <form id="strapiAnswerForm">
+                    <div class="form-group">
+                        <label for="strapiIndexName">Index Name</label>
+                        <input type="text" id="strapiIndexName" placeholder="rag-index" value="rag-index">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="strapiTopK">Top Results</label>
+                        <input type="number" id="strapiTopK" min="1" max="50" value="6">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="strapiEmbedModel">Embedding Model</label>
+                        <select id="strapiEmbedModel">
+                            <option value="text-embedding-3-small">Small (Fast)</option>
+                            <option value="text-embedding-3-large">Large (Accurate)</option>
+                        </select>
+                    </div>
+
+                    <div class="button-group" style="margin-bottom: 30px;">
+                        <button type="button" class="btn-primary" onclick="fetchStrapiQuestions()">Fetch Questions Only</button>
+                        <button type="button" class="btn-primary" onclick="answerStrapiQuestions()">Fetch & Answer All Questions</button>
+                    </div>
+                </form>
+
+                <div class="loading" id="strapiLoading">
+                    <div class="spinner"></div>
+                    <p style="color: rgba(255, 255, 255, 0.7);">Processing Strapi questions...</p>
+                </div>
+
+                <div class="status-message" id="strapiStatus"></div>
+
+                <div class="response-container" id="strapiResponse">
+                    <div id="strapiQuestionsList"></div>
                 </div>
             </div>
 
-            <!-- Batch Query Tab -->
-            <div id="batch" class="tab-content">
-                <div class="card">
-                    <h2>Batch Query</h2>
-
-                    <div id="batchAlert" class="alert"></div>
-
-                    <div class="form-group">
-                        <label>Query</label>
-                        <textarea id="batchQueryInput" rows="3" placeholder="Enter a question..."></textarea>
-                    </div>
-
-                    <button onclick="addBatchQuery()">+ Add Query</button>
-
-                    <div id="batchQueries" class="batch-queries"></div>
-
-                    <div id="batchLoader" class="loader">
-                        <div class="spinner"></div>
-                        <p style="margin-top: 10px; color: #94a3b8;">Processing batch...</p>
-                    </div>
-
-                    <button id="batchSubmitBtn" onclick="submitBatchQueries()" style="margin-top: 15px;">Submit Batch</button>
-
-                    <div id="batchResults" class="results" style="display: none; margin-top: 20px;">
-                        <h3 style="color: #60a5fa; margin-bottom: 15px;">📊 Batch Results</h3>
-                        <div id="batchResultsContent"></div>
-                    </div>
+            <!-- DEBUG TAB -->
+            <div id="debug" class="tab-content">
+                <h2 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 24px;">System Status</h2>
+                <div class="form-group">
+                    <label for="debugIndexName">Index Name</label>
+                    <input type="text" id="debugIndexName" placeholder="rag-index" value="rag-index">
                 </div>
-            </div>
 
-            <!-- Settings Sidebar -->
-            <div>
-                <div class="card">
-                    <h2>⚙️ Settings</h2>
+                <button type="button" class="btn-primary" onclick="checkDebug()">Check Status</button>
 
-                    <!-- <div class="settings-card">
-                        <h3>Query Settings</h3>
-                        <div class="form-group">
-                            <label>Index Name</label>
-                            <input type="text" id="queryIndexName" value="rag-index" />
-                        </div>
-                        <div class="form-group">
-                            <label>Embedding Model</label>
-                            <select id="queryEmbedModel">
-                                <option value="text-embedding-3-small">text-embedding-3-small</option>
-                                <option value="text-embedding-3-large">text-embedding-3-large</option>
-                                <option value="small">small</option>
-                                <option value="large">large</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Chat Model</label>
-                            <select id="chatModel">
-                                <option value="gpt-4o-mini">gpt-4o-mini</option>
-                                <option value="gpt-4o">gpt-4o</option>
-                                <option value="gpt-4-turbo">gpt-4-turbo</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label>Top K Results</label>
-                            <input type="number" id="topK" value="6" min="1" max="50" />
-                        </div>
-                    </div> -->
+                <div class="loading" id="debugLoading">
+                    <div class="spinner"></div>
+                    <p style="color: rgba(255, 255, 255, 0.7);">Fetching status...</p>
+                </div>
 
-                    <div class="settings-card">
-                        <h3>📜 Query History</h3>
-                        <div id="history"></div>
-                        <p class="text-muted" id="noHistory">No queries yet</p>
+                <div class="response-container" id="debugResponse">
+                    <div class="grid">
+                        <div class="stats-card">
+                            <div class="stats-number" id="indexStatus">-</div>
+                            <div class="stats-label">Index Status</div>
+                        </div>
+                        <div class="stats-card">
+                            <div class="stats-number" id="vectorCount">-</div>
+                            <div class="stats-label">Total Vectors</div>
+                        </div>
+                        <div class="stats-card">
+                            <div class="stats-number" id="dimensionCount">-</div>
+                            <div class="stats-label">Dimension</div>
+                        </div>
                     </div>
 
-                    <div class="settings-card">
-                        <h3>🔧 API Settings</h3>
-                        <div class="form-group">
-                            <label>API Base URL</label>
-                            <input type="text" id="apiBase" value="http://localhost:8000" />
-                        </div>
-                        <button class="btn-secondary" onclick="testAPI()">Test Connection</button>
-                        <button class="btn-secondary" onclick="debugIndex()">Debug Index</button>
+                    <div class="response-card" style="margin-top: 20px;">
+                        <div class="response-title">Detailed Information</div>
+                        <div id="debugDetails" style="color: rgba(255, 255, 255, 0.8); font-family: monospace; white-space: pre-wrap; word-break: break-all;"></div>
                     </div>
                 </div>
             </div>
@@ -555,47 +632,7 @@
     </div>
 
     <script>
-        const API_BASE = () => document.getElementById('apiBase').value;
-        let queryHistory = [];
-        let batchQueries = [];
-
-        // File handling
-        const fileDrop = document.getElementById('fileDrop');
-        const fileInput = document.getElementById('fileInput');
-        let selectedFile = null;
-
-        fileDrop.addEventListener('click', () => fileInput.click());
-        fileDrop.addEventListener('dragover', (e) => {
-            e.preventDefault();
-            fileDrop.classList.add('dragover');
-        });
-
-        fileDrop.addEventListener('dragleave', () => {
-            fileDrop.classList.remove('dragover');
-        });
-
-        fileDrop.addEventListener('drop', (e) => {
-            e.preventDefault();
-            fileDrop.classList.remove('dragover');
-            if (e.dataTransfer.files.length) {
-                handleFileSelect(e.dataTransfer.files[0]);
-            }
-        });
-
-        fileInput.addEventListener('change', (e) => {
-            if (e.target.files.length) {
-                handleFileSelect(e.target.files[0]);
-            }
-        });
-
-        function handleFileSelect(file) {
-            if (!file.name.toLowerCase().endsWith('.pdf')) {
-                showAlert('ingestAlert', 'Please select a PDF file', 'error');
-                return;
-            }
-            selectedFile = file;
-            document.getElementById('fileName').textContent = `✓ ${file.name}`;
-        }
+        const API_BASE = window.location.origin;
 
         // Tab switching
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -607,274 +644,244 @@
             });
         });
 
-        function showAlert(id, message, type) {
-            const alert = document.getElementById(id);
-            alert.textContent = message;
-            alert.className = `alert ${type} show`;
-            if (type === 'success') {
-                alert.innerHTML = `<span class="alert-icon">✓</span><span>${message}</span>`;
-            } else {
-                alert.innerHTML = `<span class="alert-icon">⚠</span><span>${message}</span>`;
-            }
+        function showStatus(elementId, message, type) {
+            const el = document.getElementById(elementId);
+            el.textContent = message;
+            el.className = `status-message show ${type}`;
+            setTimeout(() => el.classList.remove('show'), 5000);
         }
 
-        async function handleIngest() {
-            if (!selectedFile) {
-                showAlert('ingestAlert', 'Please select a PDF file', 'error');
+        // INGEST FORM
+        document.getElementById('ingestForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const pdfFile = document.getElementById('pdfFile').files[0];
+            const indexName = document.getElementById('indexName').value;
+            const embeddingModel = document.getElementById('embeddingModel').value;
+
+            if (!pdfFile) {
+                showStatus('ingestStatus', 'Please select a PDF file', 'error');
                 return;
             }
-
-            const btn = document.getElementById('ingestBtn');
-            btn.disabled = true;
-            btn.textContent = 'Uploading...';
 
             const formData = new FormData();
-            formData.append('pdf', selectedFile);
-            formData.append('index_name', document.getElementById('ingestIndexName').value);
-            formData.append('embedding_model', document.getElementById('ingestEmbedModel').value);
+            formData.append('pdf', pdfFile);
+            formData.append('index_name', indexName);
+            formData.append('embedding_model', embeddingModel);
+
+            document.getElementById('ingestLoading').style.display = 'block';
+            document.getElementById('ingestResponse').classList.remove('show');
 
             try {
-                const resp = await fetch(`${API_BASE()}/ingest`, {
+                const res = await fetch(`${API_BASE}/ingest`, {
                     method: 'POST',
-                    body: formData,
+                    body: formData
                 });
 
-                if (!resp.ok) {
-                    const err = await resp.json();
-                    throw new Error(err.detail || 'Ingestion failed');
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Upload failed');
                 }
 
-                const data = await resp.json();
-                showAlert('ingestAlert',
-                    `✓ Ingested "${selectedFile.name}"\n${data.chunks} chunks created (${data.dimension}D)\nDoc ID: ${data.doc_id}`,
-                    'success');
-                selectedFile = null;
-                document.getElementById('fileName').textContent = '';
-                fileInput.value = '';
+                const data = await res.json();
+                document.getElementById('docId').textContent = data.doc_id;
+                document.getElementById('chunksCount').textContent = data.chunks;
+                document.getElementById('modelUsed').textContent = data.embedding_model;
+                document.getElementById('dimension').textContent = data.dimension;
+
+                document.getElementById('ingestResponse').classList.add('show');
+                showStatus('ingestStatus', '✓ Document indexed successfully!', 'success');
+                document.getElementById('ingestForm').reset();
             } catch (err) {
-                showAlert('ingestAlert', `Error: ${err.message}`, 'error');
+                showStatus('ingestStatus', `✗ ${err.message}`, 'error');
             } finally {
-                btn.disabled = false;
-                btn.textContent = 'Upload & Ingest';
+                document.getElementById('ingestLoading').style.display = 'none';
             }
-        }
+        });
 
-        async function handleQuery() {
-            const query = document.getElementById('queryInput').value.trim();
-            if (!query) {
-                showAlert('queryAlert', 'Please enter a question', 'error');
-                return;
-            }
+        // QUERY FORM
+        document.getElementById('queryForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const query = document.getElementById('queryText').value;
+            const topK = parseInt(document.getElementById('topK').value);
+            const indexName = document.getElementById('queryIndexName').value;
 
-            const btn = document.getElementById('queryBtn');
-            const loader = document.getElementById('queryLoader');
-            btn.disabled = true;
-            loader.classList.add('show');
+            document.getElementById('queryLoading').style.display = 'block';
+            document.getElementById('queryResponse').classList.remove('show');
 
             try {
-                const resp = await fetch(`${API_BASE()}/query`, {
+                const res = await fetch(`${API_BASE}/query`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        query: query,
-                        top_k: parseInt(document.getElementById('topK').value),
-                        index_name: document.getElementById('queryIndexName').value,
-                        embedding_model: document.getElementById('queryEmbedModel').value,
-                        chat_model: document.getElementById('chatModel').value,
-                    }),
+                        query,
+                        top_k: topK,
+                        index_name: indexName
+                    })
                 });
 
-                if (!resp.ok) {
-                    const err = await resp.json();
+                if (!res.ok) {
+                    const err = await res.json();
                     throw new Error(err.detail || 'Query failed');
                 }
 
-                const data = await resp.json();
-                displayResults(data);
-                queryHistory.unshift({ query, answer: data.answer, time: new Date() });
-                updateHistory();
-                showAlert('queryAlert', 'Query processed successfully', 'success');
+                const data = await res.json();
+                document.getElementById('answerText').textContent = data.answer;
+
+                const sourcesList = document.getElementById('sourcesList');
+                sourcesList.innerHTML = '';
+                if (data.sources.length > 0) {
+                    data.sources.forEach((source, i) => {
+                        const item = document.createElement('div');
+                        item.className = 'source-item';
+                        item.innerHTML = `<strong>Source ${i + 1}:</strong> Page ${source.page} (Score: ${(source.score * 100).toFixed(1)}%)`;
+                        sourcesList.appendChild(item);
+                    });
+                } else {
+                    sourcesList.innerHTML = '<div style="color: rgba(255, 255, 255, 0.5);">No sources found</div>';
+                }
+
+                document.getElementById('queryResponse').classList.add('show');
             } catch (err) {
-                showAlert('queryAlert', `Error: ${err.message}`, 'error');
+                showStatus('queryStatus', `✗ ${err.message}`, 'error');
             } finally {
-                btn.disabled = false;
-                loader.classList.remove('show');
+                document.getElementById('queryLoading').style.display = 'none';
             }
-        }
+        });
 
-        function displayResults(data) {
-            const resultsDiv = document.getElementById('results');
-            document.getElementById('resultAnswer').textContent = data.answer;
-
-            let sourcesHtml = '<h3>📚 Sources</h3>';
-            data.sources.forEach(src => {
-                sourcesHtml += `
-                    <div class="source-item">
-                        <strong>Page ${src.page}</strong> (Score: ${(src.score * 100).toFixed(1)}%)
-                        <div class="source-meta">ID: ${src.id}</div>
-                    </div>
-                `;
-            });
-            document.getElementById('resultSources').innerHTML = sourcesHtml;
-            resultsDiv.style.display = 'block';
-        }
-
-        function updateHistory() {
-            const historyDiv = document.getElementById('history');
-            const noHistory = document.getElementById('noHistory');
-
-            if (queryHistory.length === 0) {
-                noHistory.style.display = 'block';
-                historyDiv.innerHTML = '';
-                return;
-            }
-
-            noHistory.style.display = 'none';
-            historyDiv.innerHTML = queryHistory.slice(0, 5).map((item, i) => `
-                <div class="history-item" onclick="replayQuery(${i})">
-                    <div class="history-query">${item.query.substring(0, 40)}...</div>
-                    <div class="history-time">${item.time.toLocaleTimeString()}</div>
-                </div>
-            `).join('');
-        }
-
-        function replayQuery(index) {
-            const item = queryHistory[index];
-            document.getElementById('queryInput').value = item.query;
-            document.querySelectorAll('.tab-btn')[1].click();
-        }
-
-        // Batch Query Functions
-        function addBatchQuery() {
-            const query = document.getElementById('batchQueryInput').value.trim();
-            if (!query) {
-                showAlert('batchAlert', 'Please enter a query', 'error');
-                return;
-            }
-
-            batchQueries.push(query);
-            document.getElementById('batchQueryInput').value = '';
-            updateBatchList();
-            showAlert('batchAlert', 'Query added to batch', 'success');
-        }
-
-        function updateBatchList() {
-            const batchDiv = document.getElementById('batchQueries');
-            if (batchQueries.length === 0) {
-                batchDiv.innerHTML = '<p class="text-muted">No queries added yet</p>';
-                return;
-            }
-
-            batchDiv.innerHTML = batchQueries.map((q, i) => `
-                <div class="batch-item">
-                    <div>${q.substring(0, 60)}${q.length > 60 ? '...' : ''}</div>
-                    <button class="batch-item-remove" onclick="removeBatchQuery(${i})">Remove</button>
-                </div>
-            `).join('');
-        }
-
-        function removeBatchQuery(index) {
-            batchQueries.splice(index, 1);
-            updateBatchList();
-        }
-
-        async function submitBatchQueries() {
-            if (batchQueries.length === 0) {
-                showAlert('batchAlert', 'Add at least one query to the batch', 'error');
-                return;
-            }
-
-            const btn = document.getElementById('batchSubmitBtn');
-            const loader = document.getElementById('batchLoader');
-            btn.disabled = true;
-            loader.classList.add('show');
-
-            const payload = batchQueries.map(q => ({
-                query: q,
-                top_k: parseInt(document.getElementById('topK').value),
-                index_name: document.getElementById('queryIndexName').value,
-                embedding_model: document.getElementById('queryEmbedModel').value,
-                chat_model: document.getElementById('chatModel').value,
-            }));
+        // DEBUG CHECK
+        async function checkDebug() {
+            const indexName = document.getElementById('debugIndexName').value;
+            document.getElementById('debugLoading').style.display = 'block';
+            document.getElementById('debugResponse').classList.remove('show');
 
             try {
-                const resp = await fetch(`${API_BASE()}/query/batch`, {
+                const res = await fetch(`${API_BASE}/debug?index_name=${encodeURIComponent(indexName)}`);
+                const data = await res.json();
+
+                if (!data.exists) {
+                    document.getElementById('indexStatus').textContent = 'Not Found';
+                    document.getElementById('vectorCount').textContent = '0';
+                    document.getElementById('dimensionCount').textContent = '-';
+                } else {
+                    document.getElementById('indexStatus').textContent = '✓ Active';
+                    document.getElementById('vectorCount').textContent = data.total_vectors;
+                    document.getElementById('dimensionCount').textContent = data.dimension;
+                }
+
+                document.getElementById('debugDetails').textContent = JSON.stringify(data, null, 2);
+                document.getElementById('debugResponse').classList.add('show');
+            } catch (err) {
+                showStatus('debugStatus', `✗ ${err.message}`, 'error');
+            } finally {
+                document.getElementById('debugLoading').style.display = 'none';
+            }
+        }
+
+        // STRAPI QUESTIONS
+        async function fetchStrapiQuestions() {
+            document.getElementById('strapiLoading').style.display = 'block';
+            document.getElementById('strapiResponse').classList.remove('show');
+
+            try {
+                const res = await fetch(`${API_BASE}/strapi/questions`);
+                
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Failed to fetch questions');
+                }
+
+                const data = await res.json();
+                const questionsList = document.getElementById('strapiQuestionsList');
+                questionsList.innerHTML = '';
+
+                if (data.questions && data.questions.length > 0) {
+                    data.questions.forEach((q, idx) => {
+                        const card = document.createElement('div');
+                        card.className = 'response-card';
+                        card.innerHTML = `
+                            <div class="response-title">Question ${idx + 1} (ID: ${q.id})</div>
+                            <div class="response-text">${q.question}</div>
+                        `;
+                        questionsList.appendChild(card);
+                    });
+                    
+                    document.getElementById('strapiResponse').classList.add('show');
+                    showStatus('strapiStatus', `✓ Fetched ${data.questions.length} questions from Strapi`, 'success');
+                } else {
+                    showStatus('strapiStatus', 'No questions found in Strapi', 'info');
+                }
+            } catch (err) {
+                showStatus('strapiStatus', `✗ ${err.message}`, 'error');
+            } finally {
+                document.getElementById('strapiLoading').style.display = 'none';
+            }
+        }
+
+        async function answerStrapiQuestions() {
+            const indexName = document.getElementById('strapiIndexName').value;
+            const topK = parseInt(document.getElementById('strapiTopK').value);
+            const embeddingModel = document.getElementById('strapiEmbedModel').value;
+
+            document.getElementById('strapiLoading').style.display = 'block';
+            document.getElementById('strapiResponse').classList.remove('show');
+
+            try {
+                const formData = new FormData();
+                formData.append('index_name', indexName);
+                formData.append('top_k', topK);
+                formData.append('embedding_model', embeddingModel);
+                formData.append('chat_model', 'gpt-4o-mini');
+
+                const res = await fetch(`${API_BASE}/strapi/answer-questions`, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(payload),
+                    body: formData
                 });
 
-                if (!resp.ok) {
-                    const err = await resp.json();
-                    throw new Error(err.detail || 'Batch query failed');
+                if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.detail || 'Failed to answer questions');
                 }
 
-                const data = await resp.json();
-                displayBatchResults(data.results);
-                showAlert('batchAlert', `Batch complete! ${data.results.length} results`, 'success');
+                const data = await res.json();
+                const questionsList = document.getElementById('strapiQuestionsList');
+                questionsList.innerHTML = '';
+
+                if (data.results && data.results.length > 0) {
+                    data.results.forEach((item, idx) => {
+                        const card = document.createElement('div');
+                        card.className = 'response-card';
+                        
+                        let sourcesHtml = '';
+                        if (item.sources && item.sources.length > 0) {
+                            sourcesHtml = '<div class="sources"><div class="sources-title">📚 Sources</div>';
+                            item.sources.forEach((source, i) => {
+                                sourcesHtml += `<div class="source-item"><strong>Source ${i + 1}:</strong> Page ${source.page} (Score: ${(source.score * 100).toFixed(1)}%)</div>`;
+                            });
+                            sourcesHtml += '</div>';
+                        }
+                        
+                        card.innerHTML = `
+                            <div class="response-title">Question ${idx + 1} (ID: ${item.id})</div>
+                            <div class="response-text"><strong>Q:</strong> ${item.question}</div>
+                            <div class="response-text" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
+                                <strong style="color: #00d4ff;">A:</strong> ${item.answer}
+                            </div>
+                            ${sourcesHtml}
+                        `;
+                        questionsList.appendChild(card);
+                    });
+                    
+                    document.getElementById('strapiResponse').classList.add('show');
+                    showStatus('strapiStatus', `✓ Answered ${data.results.length} questions successfully!`, 'success');
+                } else {
+                    showStatus('strapiStatus', 'No questions to process', 'info');
+                }
             } catch (err) {
-                showAlert('batchAlert', `Error: ${err.message}`, 'error');
+                showStatus('strapiStatus', `✗ ${err.message}`, 'error');
             } finally {
-                btn.disabled = false;
-                loader.classList.remove('show');
+                document.getElementById('strapiLoading').style.display = 'none';
             }
         }
-
-        function displayBatchResults(results) {
-            const resultsDiv = document.getElementById('batchResults');
-            let html = '';
-
-            results.forEach((result, idx) => {
-                html += `
-                    <div style="margin-bottom: 25px; padding-bottom: 20px; border-bottom: 1px solid #334155;">
-                        <h4 style="color: #60a5fa; margin-bottom: 10px;">Query ${idx + 1}</h4>
-                        <p style="color: #e2e8f0; margin-bottom: 12px;">${result.answer}</p>
-                        <div style="font-size: 0.85rem; color: #94a3b8;">
-                            Sources: ${result.sources.length} match${result.sources.length !== 1 ? 'es' : ''}
-                        </div>
-                    </div>
-                `;
-            });
-
-            document.getElementById('batchResultsContent').innerHTML = html;
-            resultsDiv.style.display = 'block';
-        }
-
-        async function testAPI() {
-            try {
-                const resp = await fetch(`${API_BASE()}/health`);
-                if (resp.ok) {
-                    showAlert('queryAlert', 'API connection successful ✓', 'success');
-                } else {
-                    showAlert('queryAlert', 'API connection failed', 'error');
-                }
-            } catch (err) {
-                showAlert('queryAlert', `Connection error: ${err.message}`, 'error');
-            }
-        }
-
-        async function debugIndex() {
-            try {
-                const indexName = document.getElementById('queryIndexName').value;
-                const resp = await fetch(`${API_BASE()}/debug?index_name=${indexName}`);
-                if (resp.ok) {
-                    const data = await resp.json();
-                    let msg = `Index: ${data.index}\n`;
-                    if (data.exists) {
-                        msg += `Dimension: ${data.dimension}\nTotal Vectors: ${data.total_vectors}\nMetric: ${data.metric}`;
-                    } else {
-                        msg += 'Index does not exist';
-                    }
-                    showAlert('queryAlert', msg, 'success');
-                } else {
-                    showAlert('queryAlert', 'Debug failed', 'error');
-                }
-            } catch (err) {
-                showAlert('queryAlert', `Error: ${err.message}`, 'error');
-            }
-        }
-
-        updateBatchList();
     </script>
 </body>
 </html>
