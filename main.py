@@ -36,7 +36,7 @@ DEFAULT_EMBED_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
 DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
 
 # Strapi API Configuration
-STRAPI_API_URL = "https://admin.equivision.in/api/preset-questions"
+STRAPI_API_URL = "https://admin.equivision.in/api/preset-questions?pagination[pageSize]=100"
 STRAPI_BEARER_TOKEN = "7c95c5c490694a382a102afa60f7df7d64922a7e840719b2cd5803706e9fabdad8bc508f39fcdfef30df399141818dbb65b4b6ae82ba7a1befbccf27fbc3864f45b2bda0417d597d4db28ef893be167e4c2c314a54a6a9b0b901ed2a8569a51e394f423d39735fc77f02ce721db19a30360558c11bff03bb7e25b877f2eea0f4"
 
 EMBED_DIMS = {
