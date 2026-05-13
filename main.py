@@ -298,12 +298,20 @@ def build_prompt(query: str, contexts: List[Dict[str, Any]]) -> str:
         page = c.get("page")
         text = c.get("text", "")
         bullets.append(f"(p.{page}) {text}")
+
     context_block = "\n\n".join(bullets[:10])
+
     return (
-        "Answer strictly from the provided context. If the answer is not present, say you don't have enough information.\n\n"
+        "You are an information extraction assistant.\n"
+        "Answer using ONLY the exact value present in the context.\n"
+        "Do NOT write explanatory sentences.\n"
+        "Do NOT repeat the question.\n"
+        "Do NOT prefix the answer with labels like 'The answer is'.\n"
+        "Return only the direct extracted entity, name, number, or phrase.\n"
+        "If the answer is not present in the context, return exactly: Not found\n\n"
         f"Question:\n{query}\n\n"
         f"Context:\n{context_block}\n\n"
-        "Answer concisely and cite page numbers inline like [p.X]."
+        "Answer:"
     )
 
 def generate_answer_internal(index, query: str, embedding_model: str, chat_model: str, top_k: int = 6) -> str:
