@@ -3,7 +3,6 @@ import io
 import uuid
 import math
 from typing import List, Dict, Any, Optional
-import time
 import logging
 import pdfplumber
 import httpx
@@ -41,6 +40,11 @@ STRAPI_BEARER_TOKEN = os.getenv(
     "STRAPI_BEARER_TOKEN",
     "7c95c5c490694a382a102afa60f7df7d64922a7e840719b2cd5803706e9fabdad8bc508f39fcdfef30df399141818dbb65b4b6ae82ba7a1befbccf27fbc3864f45b2bda0417d597d4db28ef893be167e4c2c314a54a6a9b0b901ed2a8569a51e394f423d39735fc77f02ce721db19a30360558c11bff03bb7e25b877f2eea0f4"
 )
+
+# HARDCODED QUESTIONS FOR PROCESSING
+HARDCODED_QUESTIONS = [
+    "Who is the arranger/lead manger?"
+]
 
 EMBED_DIMS = {
     "text-embedding-3-small": 1536,
@@ -84,12 +88,25 @@ class QueryRequest(BaseModel):
     )
     chat_model: Optional[str] = Field(None, examples=[DEFAULT_CHAT_MODEL])
 
-class IngestResponse(BaseModel):
-    index_name: str
+# QA Schema for Hardcoded Answers
+class QAItem(BaseModel):
+    question: str
+    answer: str
+
+class FileIngestResult(BaseModel):
+    filename: str
     doc_id: str
     chunks: int
+    status: str  # "processed", "deleted_after_processing", "error"
+    qas: List[QAItem] # Answers to the hardcoded questions
+
+class BatchIngestResponse(BaseModel):
+    index_name: str
+    total_files: int
     embedding_model: str
     dimension: int
+    current_doc_id: Optional[str] 
+    results: List[FileIngestResult]
 
 class QueryResponse(BaseModel):
     answer: str
@@ -151,7 +168,6 @@ def ensure_index(index_name: str, embedding_model: str):
                 pass
 
         if actual_dim is not None and actual_dim != required_dim:
-            # Auto-migrate: delete + recreate (safe because you must re-embed anyway)
             logger.warning(
                 f"Index '{index_name}' has dim {actual_dim}, but model '{embedding_model}' needs {required_dim}. "
                 f"Recreating index…"
@@ -202,7 +218,6 @@ def extract_pdf_text_chunks(pdf_bytes: bytes,
                 snippet = text[start:end].strip()
                 if snippet:
                     chunks.append({"page": pageno, "text": snippet})
-                    # log every 100 chunks
                     if len(chunks) % 100 == 0:
                         logger.info(f"chunking... {len(chunks)}")
                 if end >= n:
@@ -229,11 +244,15 @@ def embed_texts(texts: List[str], model: str) -> List[List[float]]:
 
 
 def upsert_chunks_to_pinecone(index, doc_id: str, chunks: List[Dict[str, Any]],
-                              embeddings: List[List[float]]):
+                              embeddings: List[List[float]]) -> List[str]:
+    """Returns list of vector IDs created"""
     vectors = []
+    vector_ids = []
     for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
+        v_id = f"{doc_id}-{i}"
+        vector_ids.append(v_id)
         vectors.append({
-            "id": f"{doc_id}-{i}",
+            "id": v_id,
             "values": emb,
             "metadata": {
                 "doc_id": doc_id,
@@ -250,6 +269,7 @@ def upsert_chunks_to_pinecone(index, doc_id: str, chunks: List[Dict[str, Any]],
         logger.info(f"upserting vectors {batch_no}/{total_batches} ...")
         index.upsert(vectors=vectors[i:i + batch])
     logger.info("upsert done.")
+    return vector_ids
 
 
 def search(index, query_embedding: List[float], top_k: int = 6):
@@ -286,6 +306,38 @@ def build_prompt(query: str, contexts: List[Dict[str, Any]]) -> str:
         "Answer concisely and cite page numbers inline like [p.X]."
     )
 
+def generate_answer_internal(index, query: str, embedding_model: str, chat_model: str, top_k: int = 6) -> str:
+    """Helper function to query and generate answer without returning full source metadata"""
+    try:
+        q_emb = oa_client.embeddings.create(model=embedding_model, input=[query]).data[0].embedding
+    except Exception as e:
+        logger.error(f"Embedding error for internal query: {e}")
+        return "Error generating embedding"
+
+    try:
+        matches = search(index, q_emb, top_k=top_k)
+    except Exception as e:
+        logger.error(f"Pinecone query error for internal query: {e}")
+        return "Error querying database"
+
+    if not matches:
+        return "I don't have enough information to answer from the knowledge base."
+
+    prompt = build_prompt(query, matches)
+
+    try:
+        chat = oa_client.chat.completions.create(
+            model=chat_model,
+            messages=[
+                {"role": "system", "content": "You are a concise expert assistant."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2,
+        )
+        return chat.choices[0].message.content.strip()
+    except Exception as e:
+        logger.error(f"Chat error for internal query: {e}")
+        return "Error generating answer"
 
 def safe_clear_index(index, namespace: str = "") -> None:
     try:
@@ -310,43 +362,99 @@ def safe_clear_index(index, namespace: str = "") -> None:
 
 
 # ------------ ENDPOINTS ------------
-@app.post("/ingest", response_model=IngestResponse)
-async def ingest_pdf(
-    pdf: UploadFile = File(...),
+@app.post("/ingest", response_model=BatchIngestResponse)
+async def ingest_pdfs(
+    pdfs: List[UploadFile] = File(...), 
     index_name: str = Form(DEFAULT_INDEX_NAME),
     embedding_model: str = Form(DEFAULT_EMBED_MODEL),
 ):
-    if not pdf.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Please upload a .pdf file.")
+    if not pdfs:
+        raise HTTPException(status_code=400, detail="No files provided.")
+
+    for pdf in pdfs:
+        if not pdf.filename.lower().endswith(".pdf"):
+            raise HTTPException(status_code=400, detail=f"File '{pdf.filename}' is not a .pdf file.")
 
     embedding_model = normalize_embed_model(embedding_model)
-    logger.info(f"/ingest called. index={index_name}, embed_model={embedding_model}")
+    chat_model = DEFAULT_CHAT_MODEL
+    logger.info(f"/ingest called. index={index_name}, embed_model={embedding_model}, files={len(pdfs)}")
 
     index, dim = ensure_index(index_name, embedding_model)
 
+    # Clear everything initially to start fresh
     safe_clear_index(index, namespace="")
 
-    content = await pdf.read()
-    chunks = extract_pdf_text_chunks(content, max_tokens=800, overlap=150)
-    if not chunks:
-        raise HTTPException(
-            status_code=400,
-            detail="No text extracted. Likely a scanned PDF. Run OCR (e.g., Tesseract) before ingestion."
-        )
+    results: List[FileIngestResult] = []
+    final_doc_id = None
+    vector_ids_to_delete = []
 
-    doc_id = str(uuid.uuid4())
-    texts = [c["text"] for c in chunks]
-    embeddings = embed_texts(texts, model=embedding_model)
-    upsert_chunks_to_pinecone(index, doc_id, chunks, embeddings)
+    total_files = len(pdfs)
 
-    logger.info(f"ingest complete. doc_id={doc_id}, chunks={len(chunks)}")
+    for i, pdf in enumerate(pdfs):
+        logger.info(f"Processing file {i+1}/{total_files}: {pdf.filename}")
+        
+        # Delete previous file's chunks if it exists and it's not the first run
+        if i > 0 and vector_ids_to_delete:
+            logger.info(f"Deleting previous chunks (count: {len(vector_ids_to_delete)}) to save storage...")
+            try:
+                index.delete(ids=vector_ids_to_delete)
+                logger.info("Previous chunks deleted successfully.")
+                # Update status of the previous result to indicate deletion
+                if i - 1 < len(results):
+                    results[i-1].status = "deleted_after_processing"
+            except Exception as e:
+                logger.error(f"Error deleting previous chunks: {e}")
 
-    return IngestResponse(
+        content = await pdf.read()
+        try:
+            chunks = extract_pdf_text_chunks(content, max_tokens=800, overlap=150)
+        except Exception as e:
+            logger.error(f"Error extracting text from {pdf.filename}: {e}")
+            results.append(FileIngestResult(filename=pdf.filename, doc_id="", chunks=0, status=f"Error: {str(e)}", qas=[]))
+            continue
+
+        if not chunks:
+            logger.warning(f"No text extracted from {pdf.filename}")
+            results.append(FileIngestResult(filename=pdf.filename, doc_id="", chunks=0, status="No text extracted", qas=[]))
+            continue
+
+        doc_id = str(uuid.uuid4())
+        texts = [c["text"] for c in chunks]
+        embeddings = embed_texts(texts, model=embedding_model)
+        
+        # Upsert and get the list of vector IDs created
+        vector_ids = upsert_chunks_to_pinecone(index, doc_id, chunks, embeddings)
+        
+        # *** NEW: ANSWER HARDCODED QUESTIONS ***
+        logger.info(f"Answering {len(HARDCODED_QUESTIONS)} hardcoded questions for {pdf.filename}...")
+        qa_results = []
+        for q in HARDCODED_QUESTIONS:
+            ans = generate_answer_internal(index, q, embedding_model, chat_model)
+            qa_results.append(QAItem(question=q, answer=ans))
+        
+        # Store current IDs to be deleted in next iteration
+        vector_ids_to_delete = vector_ids
+        final_doc_id = doc_id
+
+        status_msg = "processed_active"
+        
+        results.append(FileIngestResult(
+            filename=pdf.filename,
+            doc_id=doc_id,
+            chunks=len(chunks),
+            status=status_msg,
+            qas=qa_results # Include the Q&A results
+        ))
+
+    logger.info(f"Batch ingest complete. Total processed: {len(results)}")
+
+    return BatchIngestResponse(
         index_name=index_name,
-        doc_id=doc_id,
-        chunks=len(chunks),
+        total_files=total_files,
         embedding_model=embedding_model,
         dimension=dim,
+        current_doc_id=final_doc_id,
+        results=results
     )
 
 
@@ -497,9 +605,7 @@ async def fetch_strapi_questions():
             response.raise_for_status()
             
             data = response.json()
-            # logger.info(f"Received data from Strapi: {data}")
             
-            # Parse the Strapi response structure
             questions = []
             if isinstance(data, dict) and "data" in data:
                 for item in data["data"]:

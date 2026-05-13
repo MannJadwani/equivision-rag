@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>RAG - Retrieval Augmented Generation</title>
+    <!-- SheetJS Library for Excel Export -->
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
     <style>
         * {
             margin: 0;
@@ -46,7 +48,7 @@
             position: relative;
             z-index: 1;
             width: 100%;
-            max-width: 1200px;
+            max-width: 1400px;
         }
 
         header {
@@ -259,6 +261,18 @@
             background: rgba(255, 255, 255, 0.15);
             border-color: rgba(255, 255, 255, 0.3);
         }
+        
+        .btn-success {
+            background: linear-gradient(135deg, #10b981, #059669);
+            color: white;
+            box-shadow: 0 10px 30px rgba(16, 185, 129, 0.3);
+            display: none; /* Hidden by default */
+        }
+        
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 40px rgba(16, 185, 129, 0.4);
+        }
 
         .loading {
             display: none;
@@ -332,6 +346,84 @@
             }
         }
 
+        /* Table Styles for Ingest Results */
+        .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            color: rgba(255, 255, 255, 0.9);
+        }
+
+        .results-table th, .results-table td {
+            text-align: left;
+            padding: 16px;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .results-table th {
+            background-color: rgba(0, 212, 255, 0.1);
+            color: #00d4ff;
+            font-weight: 600;
+        }
+
+        .results-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .results-table tr:hover td {
+            background-color: rgba(255, 255, 255, 0.05);
+        }
+
+        .filename-cell {
+            font-weight: 600;
+            font-size: 1.1em;
+            color: #fff;
+        }
+
+        .qa-cell {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .qa-item {
+            background: rgba(255, 255, 255, 0.03);
+            border-left: 3px solid #00d4ff;
+            padding: 10px;
+            border-radius: 4px;
+        }
+
+        .qa-question {
+            font-weight: 600;
+            color: #00d4ff;
+            margin-bottom: 4px;
+            font-size: 0.9em;
+        }
+
+        .qa-answer {
+            font-size: 0.95em;
+            color: rgba(255, 255, 255, 0.8);
+        }
+
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+        
+        .status-active {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+        }
+
+        .status-deleted {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+
+        /* Other tabs styles... */
         .response-card {
             background: rgba(255, 255, 255, 0.07);
             border: 1px solid rgba(255, 255, 255, 0.12);
@@ -439,6 +531,11 @@
             button {
                 width: 100%;
             }
+            
+            .results-table th, .results-table td {
+                padding: 10px;
+                font-size: 0.9em;
+            }
         }
     </style>
 </head>
@@ -451,7 +548,7 @@
 
         <div class="glass">
             <div class="tabs">
-                <button class="tab-btn active" data-tab="ingest">Upload Document</button>
+                <button class="tab-btn active" data-tab="ingest">Upload Documents</button>
                 <button class="tab-btn" data-tab="query">Ask Questions</button>
                 <button class="tab-btn" data-tab="strapi">Strapi Questions</button>
                 <button class="tab-btn" data-tab="debug">System Status</button>
@@ -459,11 +556,11 @@
 
             <!-- INGEST TAB -->
             <div id="ingest" class="tab-content active">
-                <h2 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 24px;">Upload PDF Document</h2>
+                <h2 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 24px;">Upload PDF Documents</h2>
                 <form id="ingestForm">
                     <div class="form-group">
-                        <label for="pdfFile">PDF File *</label>
-                        <input type="file" id="pdfFile" accept=".pdf" required>
+                        <label for="pdfFiles">PDF Files (Select Multiple) *</label>
+                        <input type="file" id="pdfFiles" accept=".pdf" multiple required>
                     </div>
 
                     <div class="form-group">
@@ -480,26 +577,37 @@
                     </div>
 
                     <div class="button-group">
-                        <button type="submit" class="btn-primary">Upload & Index</button>
+                        <button type="submit" class="btn-primary">Upload & Extract Answers</button>
+                        <button type="button" id="downloadExcelBtn" class="btn-success" onclick="downloadExcel()">Download Excel Report</button>
                         <button type="reset" class="btn-secondary">Clear</button>
                     </div>
 
                     <div class="loading" id="ingestLoading">
                         <div class="spinner"></div>
-                        <p style="color: rgba(255, 255, 255, 0.7);">Processing your PDF...</p>
+                        <p style="color: rgba(255, 255, 255, 0.7);" id="ingestStatusText">Processing your PDFs...</p>
                     </div>
 
                     <div class="status-message" id="ingestStatus"></div>
 
                     <div class="response-container" id="ingestResponse">
-                        <div class="response-card">
-                            <div class="response-title">✓ Upload Successful</div>
-                            <div class="response-text">
-                                <p><strong>Document ID:</strong> <span id="docId"></span></p>
-                                <p><strong>Chunks Created:</strong> <span id="chunksCount"></span></p>
-                                <p><strong>Embedding Model:</strong> <span id="modelUsed"></span></p>
-                                <p><strong>Dimension:</strong> <span id="dimension"></span></p>
-                            </div>
+                        <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 20px;">Results Dashboard</h3>
+                        <p style="color: rgba(255, 255, 255, 0.6); margin-bottom: 20px;">
+                            Extraction results ready for review or export.
+                        </p>
+                        
+                        <div style="overflow-x: auto;">
+                            <table class="results-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 25%;">PDF</th>
+                                        <th style="width: 15%;">Status</th>
+                                        <th style="width: 60%;">Lead Manager / Arranger</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="fileResultsTableBody">
+                                    <!-- Rows injected via JS -->
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </form>
@@ -633,6 +741,7 @@
 
     <script>
         const API_BASE = window.location.origin;
+        let globalIngestData = null; // Store data globally for Excel export
 
         // Tab switching
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -648,28 +757,36 @@
             const el = document.getElementById(elementId);
             el.textContent = message;
             el.className = `status-message show ${type}`;
-            setTimeout(() => el.classList.remove('show'), 5000);
+            // Auto hide after 5 seconds for success/info, keep for errors
+            if(type !== 'error') {
+                setTimeout(() => el.classList.remove('show'), 5000);
+            }
         }
 
         // INGEST FORM
         document.getElementById('ingestForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            const pdfFile = document.getElementById('pdfFile').files[0];
+            const pdfFiles = document.getElementById('pdfFiles').files;
             const indexName = document.getElementById('indexName').value;
             const embeddingModel = document.getElementById('embeddingModel').value;
 
-            if (!pdfFile) {
-                showStatus('ingestStatus', 'Please select a PDF file', 'error');
+            if (pdfFiles.length === 0) {
+                showStatus('ingestStatus', 'Please select at least one PDF file', 'error');
                 return;
             }
 
             const formData = new FormData();
-            formData.append('pdf', pdfFile);
+            for (let i = 0; i < pdfFiles.length; i++) {
+                formData.append('pdfs', pdfFiles[i]);
+            }
             formData.append('index_name', indexName);
             formData.append('embedding_model', embeddingModel);
 
             document.getElementById('ingestLoading').style.display = 'block';
+            document.getElementById('ingestStatusText').textContent = `Processing ${pdfFiles.length} files and extracting answers...`;
             document.getElementById('ingestResponse').classList.remove('show');
+            document.getElementById('downloadExcelBtn').style.display = 'none'; // Hide button during load
+            showStatus('ingestStatus', '', ''); // Clear previous status
 
             try {
                 const res = await fetch(`${API_BASE}/ingest`, {
@@ -683,20 +800,99 @@
                 }
 
                 const data = await res.json();
-                document.getElementById('docId').textContent = data.doc_id;
-                document.getElementById('chunksCount').textContent = data.chunks;
-                document.getElementById('modelUsed').textContent = data.embedding_model;
-                document.getElementById('dimension').textContent = data.dimension;
+                globalIngestData = data; // Store for Excel
+                
+                // Clear previous table
+                const tbody = document.getElementById('fileResultsTableBody');
+                tbody.innerHTML = '';
+
+                if (data.results && data.results.length > 0) {
+                    data.results.forEach(file => {
+                        const row = document.createElement('tr');
+                        
+                        let statusHtml = '';
+                        if (file.status.includes('active')) {
+                            statusHtml = '<span class="status-badge status-active">Active</span>';
+                        } else if (file.status.includes('deleted')) {
+                            statusHtml = '<span class="status-badge status-deleted">Processed (Deleted)</span>';
+                        } else {
+                            statusHtml = `<span class="status-badge" style="background:rgba(239,68,68,0.2);color:#ef4444;">Error</span>`;
+                        }
+
+                        // Extract the answer for the single hardcoded question
+                        // Backend returns a list of QAs, we want the first one.
+                        let answerText = "N/A";
+                        if (file.qas && file.qas.length > 0) {
+                            answerText = file.qas[0].answer;
+                        } else if (file.status.includes('Error')) {
+                            answerText = file.status;
+                        } else {
+                            answerText = "No answer found";
+                        }
+
+                        row.innerHTML = `
+                            <td>
+                                <div class="filename-cell">${file.filename}</div>
+                                <div style="font-size: 0.8em; color: rgba(255,255,255,0.5);">${file.chunks} chunks</div>
+                            </td>
+                            <td>${statusHtml}</td>
+                            <td>${answerText}</td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                }
 
                 document.getElementById('ingestResponse').classList.add('show');
-                showStatus('ingestStatus', '✓ Document indexed successfully!', 'success');
-                document.getElementById('ingestForm').reset();
+                document.getElementById('downloadExcelBtn').style.display = 'inline-block'; // Show button
+                showStatus('ingestStatus', `✓ Processed ${data.total_files} files successfully!`, 'success');
             } catch (err) {
                 showStatus('ingestStatus', `✗ ${err.message}`, 'error');
             } finally {
                 document.getElementById('ingestLoading').style.display = 'none';
             }
         });
+
+        // EXCEL DOWNLOAD FUNCTION
+        function downloadExcel() {
+            if (!globalIngestData || !globalIngestData.results) {
+                // Replaced native alert with status message
+                showStatus('ingestStatus', '✗ No data available to export.', 'error');
+                return;
+            }
+
+            // Map data to specific columns: PDF and LeadManager/Arranger
+            const dataToExport = globalIngestData.results.map(file => {
+                // Access the first answer (index 0) which corresponds to the hardcoded question
+                let answer = "N/A";
+                if (file.qas && file.qas.length > 0) {
+                    answer = file.qas[0].answer;
+                }
+
+                return {
+                    "PDF": file.filename,
+                    "LeadManager/Arranger": answer
+                };
+            });
+
+            // Create worksheet
+            const ws = XLSX.utils.json_to_sheet(dataToExport);
+            
+            // Set column widths: PDF (40 chars), LeadManager/Arranger (60 chars)
+            const wscols = [
+                {wch: 40}, 
+                {wch: 60}
+            ];
+            ws['!cols'] = wscols;
+
+            // Create workbook
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Extraction Results");
+
+            // Download file
+            XLSX.writeFile(wb, "Extraction_Results.xlsx");
+            
+            showStatus('ingestStatus', '✓ Excel file downloaded successfully.', 'success');
+        }
 
         // QUERY FORM
         document.getElementById('queryForm').addEventListener('submit', async (e) => {
