@@ -261,7 +261,7 @@ def upsert_chunks_to_pinecone(index, doc_id: str, chunks: List[Dict[str, Any]],
             }
         })
 
-    batch = 100
+    batch = 200
     total = len(vectors)
     total_batches = math.ceil(total / batch)
     for i in range(0, total, batch):
