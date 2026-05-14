@@ -193,7 +193,7 @@ def ensure_index(index_name: str, embedding_model: str):
     return pc.Index(index_name), required_dim
 
 def extract_pdf_text_chunks(pdf_bytes: bytes,
-                            max_tokens: int = 800,
+                            max_tokens: int = 1500,
                             overlap: int = 150) -> List[Dict[str, Any]]:
     approx_chars = max_tokens * 4
     approx_overlap = overlap * 4
@@ -415,7 +415,7 @@ async def ingest_pdfs(
 
         content = await pdf.read()
         try:
-            chunks = extract_pdf_text_chunks(content, max_tokens=800, overlap=150)
+            chunks = extract_pdf_text_chunks(content, max_tokens=1500, overlap=150)
         except Exception as e:
             logger.error(f"Error extracting text from {pdf.filename}: {e}")
             results.append(FileIngestResult(filename=pdf.filename, doc_id="", chunks=0, status=f"Error: {str(e)}", qas=[]))
