@@ -1,11 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RAG - Retrieval Augmented Generation</title>
-    <!-- SheetJS Library for Excel Export -->
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+    <title>AI PDF Extractor</title>
+
     <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+
     <style>
         * {
             margin: 0;
@@ -14,1070 +17,465 @@
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
-            background-attachment: fixed;
+            font-family: Arial, sans-serif;
+            background: #0f172a;
+            color: white;
             min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-            position: relative;
-            overflow-x: hidden;
-        }
-
-        body::before {
-            content: '';
-            position: fixed;
-            top: -50%;
-            left: -50%;
-            width: 200%;
-            height: 200%;
-            background: radial-gradient(circle, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
-            background-size: 50px 50px;
-            animation: moveGrid 20s linear infinite;
-            z-index: 0;
-        }
-
-        @keyframes moveGrid {
-            0% { transform: translate(0, 0); }
-            100% { transform: translate(50px, 50px); }
+            padding: 40px;
         }
 
         .container {
-            position: relative;
-            z-index: 1;
-            width: 100%;
-            max-width: 1400px;
-        }
-
-        header {
-            text-align: center;
-            margin-bottom: 40px;
-            animation: slideDown 0.8s ease-out;
-        }
-
-        @keyframes slideDown {
-            from {
-                opacity: 0;
-                transform: translateY(-30px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+            max-width: 1300px;
+            margin: auto;
         }
 
         h1 {
-            font-size: 3.5em;
-            background: linear-gradient(135deg, #00d4ff, #7c3aed, #ff006e);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
+            text-align: center;
             margin-bottom: 10px;
-            font-weight: 700;
-            letter-spacing: -1px;
+            font-size: 42px;
         }
 
         .subtitle {
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 1.1em;
-            font-weight: 300;
-        }
-
-        .glass {
-            background: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 20px;
-            padding: 40px;
-            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-            transition: all 0.3s ease;
-        }
-
-        .glass:hover {
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(255, 255, 255, 0.2);
-            box-shadow: 0 25px 70px rgba(0, 0, 0, 0.4);
-        }
-
-        .tabs {
-            display: flex;
-            gap: 10px;
+            text-align: center;
             margin-bottom: 40px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            color: #94a3b8;
         }
 
-        .tab-btn {
-            padding: 12px 24px;
-            background: transparent;
-            border: none;
-            color: rgba(255, 255, 255, 0.6);
-            cursor: pointer;
-            font-size: 1em;
-            font-weight: 500;
-            position: relative;
-            transition: color 0.3s ease;
-        }
-
-        .tab-btn:hover {
-            color: rgba(255, 255, 255, 0.9);
-        }
-
-        .tab-btn.active {
-            color: #00d4ff;
-        }
-
-        .tab-btn.active::after {
-            content: '';
-            position: absolute;
-            bottom: -1px;
-            left: 0;
-            right: 0;
-            height: 2px;
-            background: linear-gradient(90deg, #00d4ff, #7c3aed);
-            animation: slideIn 0.3s ease;
-        }
-
-        @keyframes slideIn {
-            from {
-                width: 0;
-                left: 50%;
-            }
-            to {
-                width: 100%;
-                left: 0;
-            }
-        }
-
-        .tab-content {
-            display: none;
-            animation: fadeIn 0.4s ease;
-        }
-
-        .tab-content.active {
-            display: block;
-        }
-
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
+        .card {
+            background: #111827;
+            border-radius: 16px;
+            padding: 30px;
+            border: 1px solid #1e293b;
         }
 
         .form-group {
-            margin-bottom: 24px;
+            margin-bottom: 25px;
         }
 
         label {
             display: block;
-            margin-bottom: 8px;
-            color: rgba(255, 255, 255, 0.8);
-            font-weight: 500;
-            font-size: 0.95em;
+            margin-bottom: 10px;
+            font-weight: bold;
         }
 
-        input[type="text"],
-        input[type="number"],
-        input[type="file"],
-        select,
-        textarea {
+        input[type=file] {
             width: 100%;
-            padding: 12px 16px;
-            background: rgba(255, 255, 255, 0.05);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 12px;
-            color: rgba(255, 255, 255, 0.9);
-            font-size: 0.95em;
-            transition: all 0.3s ease;
-        }
-
-        input[type="text"]:focus,
-        input[type="number"]:focus,
-        input[type="file"]:focus,
-        select:focus,
-        textarea:focus {
-            outline: none;
-            background: rgba(255, 255, 255, 0.08);
-            border-color: rgba(0, 212, 255, 0.4);
-            box-shadow: 0 0 20px rgba(0, 212, 255, 0.2);
-        }
-
-        input[type="file"] {
-            cursor: pointer;
-        }
-
-        textarea {
-            resize: vertical;
-            min-height: 100px;
-            font-family: inherit;
-        }
-
-        .button-group {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
+            padding: 14px;
+            border-radius: 10px;
+            background: #1e293b;
+            color: white;
+            border: 1px solid #334155;
         }
 
         button {
-            padding: 12px 28px;
+            padding: 14px 24px;
             border: none;
-            border-radius: 12px;
-            font-size: 0.95em;
-            font-weight: 600;
+            border-radius: 10px;
             cursor: pointer;
-            transition: all 0.3s ease;
-            text-transform: uppercase;
-            letter-spacing: 0.5px;
+            font-size: 15px;
+            font-weight: bold;
+            transition: 0.3s;
         }
 
         .btn-primary {
-            background: linear-gradient(135deg, #00d4ff, #7c3aed);
+            background: #2563eb;
             color: white;
-            box-shadow: 0 10px 30px rgba(0, 212, 255, 0.3);
         }
 
         .btn-primary:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 15px 40px rgba(0, 212, 255, 0.4);
+            background: #1d4ed8;
         }
 
-        .btn-primary:active {
-            transform: translateY(0);
-        }
-
-        .btn-secondary {
-            background: rgba(255, 255, 255, 0.1);
-            color: rgba(255, 255, 255, 0.8);
-            border: 1px solid rgba(255, 255, 255, 0.2);
-        }
-
-        .btn-secondary:hover {
-            background: rgba(255, 255, 255, 0.15);
-            border-color: rgba(255, 255, 255, 0.3);
-        }
-        
         .btn-success {
-            background: linear-gradient(135deg, #10b981, #059669);
+            background: #059669;
             color: white;
-            box-shadow: 0 10px 30px rgba(16, 185, 129, 0.3);
-            display: none; /* Hidden by default */
+            margin-left: 10px;
+            display: none;
         }
-        
+
         .btn-success:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 15px 40px rgba(16, 185, 129, 0.4);
+            background: #047857;
         }
 
         .loading {
+            margin-top: 30px;
             display: none;
             text-align: center;
-            margin: 20px 0;
         }
 
         .spinner {
-            border: 3px solid rgba(255, 255, 255, 0.1);
-            border-top: 3px solid #00d4ff;
+            width: 50px;
+            height: 50px;
+            border: 5px solid #334155;
+            border-top: 5px solid #3b82f6;
             border-radius: 50%;
-            width: 40px;
-            height: 40px;
+            margin: auto;
             animation: spin 1s linear infinite;
-            margin: 0 auto 15px;
         }
 
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .status-message {
-            padding: 16px;
-            border-radius: 12px;
-            margin-top: 20px;
-            display: none;
-            animation: slideIn 0.3s ease;
-        }
-
-        .status-message.show {
-            display: block;
-        }
-
-        .status-message.success {
-            background: rgba(16, 185, 129, 0.15);
-            border: 1px solid rgba(16, 185, 129, 0.3);
-            color: #10b981;
-        }
-
-        .status-message.error {
-            background: rgba(239, 68, 68, 0.15);
-            border: 1px solid rgba(239, 68, 68, 0.3);
-            color: #ef4444;
-        }
-
-        .status-message.info {
-            background: rgba(59, 130, 246, 0.15);
-            border: 1px solid rgba(59, 130, 246, 0.3);
-            color: #3b82f6;
-        }
-
-        .response-container {
-            margin-top: 30px;
-            display: none;
-        }
-
-        .response-container.show {
-            display: block;
-            animation: slideUp 0.5s ease;
-        }
-
-        @keyframes slideUp {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
+            100% {
+                transform: rotate(360deg);
             }
         }
 
-        /* Table Styles for Ingest Results */
-        .results-table {
-            width: 100%;
-            border-collapse: collapse;
-            color: rgba(255, 255, 255, 0.9);
+        .status {
+            margin-top: 25px;
+            padding: 14px;
+            border-radius: 10px;
+            display: none;
         }
 
-        .results-table th, .results-table td {
-            text-align: left;
-            padding: 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-        }
-
-        .results-table th {
-            background-color: rgba(0, 212, 255, 0.1);
-            color: #00d4ff;
-            font-weight: 600;
-        }
-
-        .results-table tr:last-child td {
-            border-bottom: none;
-        }
-
-        .results-table tr:hover td {
-            background-color: rgba(255, 255, 255, 0.05);
-        }
-
-        .filename-cell {
-            font-weight: 600;
-            font-size: 1.1em;
-            color: #fff;
-        }
-
-        .qa-cell {
-            display: flex;
-            flex-direction: column;
-            gap: 10px;
-        }
-
-        .qa-item {
-            background: rgba(255, 255, 255, 0.03);
-            border-left: 3px solid #00d4ff;
-            padding: 10px;
-            border-radius: 4px;
-        }
-
-        .qa-question {
-            font-weight: 600;
-            color: #00d4ff;
-            margin-bottom: 4px;
-            font-size: 0.9em;
-        }
-
-        .qa-answer {
-            font-size: 0.95em;
-            color: rgba(255, 255, 255, 0.8);
-        }
-
-        .status-badge {
-            display: inline-block;
-            padding: 4px 8px;
-            border-radius: 4px;
-            font-size: 0.8em;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-        
-        .status-active {
+        .success {
             background: rgba(16, 185, 129, 0.2);
             color: #10b981;
         }
 
-        .status-deleted {
-            background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
+        .error {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
         }
 
-        /* Other tabs styles... */
-        .response-card {
-            background: rgba(255, 255, 255, 0.07);
-            border: 1px solid rgba(255, 255, 255, 0.12);
-            border-radius: 16px;
-            padding: 24px;
-            margin-bottom: 20px;
+        .table-container {
+            margin-top: 40px;
+            overflow-x: auto;
+            display: none;
         }
 
-        .response-title {
-            color: #00d4ff;
-            font-size: 1.1em;
-            font-weight: 600;
-            margin-bottom: 12px;
+        table {
+            width: 100%;
+            border-collapse: collapse;
         }
 
-        .response-text {
-            color: rgba(255, 255, 255, 0.85);
-            line-height: 1.6;
-            margin-bottom: 16px;
+        th {
+            background: #1e293b;
+            color: #3b82f6;
+            padding: 16px;
+            text-align: left;
         }
 
-        .sources {
-            margin-top: 16px;
-            padding-top: 16px;
-            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        td {
+            padding: 16px;
+            border-bottom: 1px solid #1e293b;
         }
 
-        .sources-title {
-            color: rgba(255, 255, 255, 0.7);
-            font-size: 0.9em;
-            font-weight: 600;
-            margin-bottom: 12px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
+        tr:hover {
+            background: rgba(255,255,255,0.03);
         }
 
-        .source-item {
-            background: rgba(0, 212, 255, 0.05);
-            border-left: 3px solid #00d4ff;
-            padding: 12px;
-            margin-bottom: 8px;
-            border-radius: 6px;
-            font-size: 0.9em;
-            color: rgba(255, 255, 255, 0.75);
+        .filename {
+            font-weight: bold;
         }
 
-        .source-item strong {
-            color: #00d4ff;
+        .answer-box {
+            background: rgba(59,130,246,0.08);
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 10px;
         }
 
-        .grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-            gap: 20px;
+        .question {
+            color: #60a5fa;
+            font-size: 13px;
+            margin-bottom: 5px;
         }
 
-        .stats-card {
-            background: rgba(255, 255, 255, 0.03);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 16px;
-            padding: 24px;
-            text-align: center;
-            transition: all 0.3s ease;
+        .answer {
+            color: #e2e8f0;
         }
 
-        .stats-card:hover {
-            background: rgba(255, 255, 255, 0.06);
-            border-color: rgba(255, 255, 255, 0.15);
-        }
-
-        .stats-number {
-            font-size: 2.5em;
-            background: linear-gradient(135deg, #00d4ff, #7c3aed);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-
-        .stats-label {
-            color: rgba(255, 255, 255, 0.6);
-            font-size: 0.9em;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-
-        @media (max-width: 768px) {
-            h1 {
-                font-size: 2.5em;
-            }
-
-            .glass {
-                padding: 24px;
-            }
-
-            .tabs {
-                flex-wrap: wrap;
-            }
-
-            .button-group {
-                flex-direction: column;
-            }
-
-            button {
-                width: 100%;
-            }
-            
-            .results-table th, .results-table td {
-                padding: 10px;
-                font-size: 0.9em;
-            }
-        }
     </style>
 </head>
+
 <body>
+
     <div class="container">
-        <header>
-            <h1>🧠 RAG System</h1>
-            <p class="subtitle">Retrieval Augmented Generation powered by AI</p>
-        </header>
 
-        <div class="glass">
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="ingest">Upload Documents</button>
-                <button class="tab-btn" data-tab="query">Ask Questions</button>
-                <button class="tab-btn" data-tab="strapi">Strapi Questions</button>
-                <button class="tab-btn" data-tab="debug">System Status</button>
-            </div>
+        <h1>🧠 AI PDF Extractor</h1>
 
-            <!-- INGEST TAB -->
-            <div id="ingest" class="tab-content active">
-                <h2 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 24px;">Upload PDF Documents</h2>
-                <form id="ingestForm">
-                    <div class="form-group">
-                        <label for="pdfFiles">PDF Files (Select Multiple) *</label>
-                        <input type="file" id="pdfFiles" accept=".pdf" multiple required>
-                    </div>
+        <p class="subtitle">
+            Upload PDFs → Extract Answers → Download Excel
+        </p>
 
-                    <div class="form-group">
-                        <label for="indexName">Index Name</label>
-                        <input type="text" id="indexName" placeholder="rag-index" value="rag-index">
-                    </div>
+        <div class="card">
 
-                    <div class="form-group">
-                        <label for="embeddingModel">Embedding Model</label>
-                        <select id="embeddingModel">
-                            <option value="text-embedding-3-small">Small (Fast)</option>
-                            <option value="text-embedding-3-large">Large (Accurate)</option>
-                        </select>
-                    </div>
+            <form id="uploadForm">
 
-                    <div class="button-group">
-                        <button type="submit" class="btn-primary">Upload & Extract Answers</button>
-                        <button type="button" id="downloadExcelBtn" class="btn-success" onclick="downloadExcel()">Download Excel Report</button>
-                        <button type="reset" class="btn-secondary">Clear</button>
-                    </div>
-
-                    <div class="loading" id="ingestLoading">
-                        <div class="spinner"></div>
-                        <p style="color: rgba(255, 255, 255, 0.7);" id="ingestStatusText">Processing your PDFs...</p>
-                    </div>
-
-                    <div class="status-message" id="ingestStatus"></div>
-
-                    <div class="response-container" id="ingestResponse">
-                        <h3 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 20px;">Results Dashboard</h3>
-                        <p style="color: rgba(255, 255, 255, 0.6); margin-bottom: 20px;">
-                            Extraction results ready for review or export.
-                        </p>
-                        
-                        <div style="overflow-x: auto;">
-                            <table class="results-table">
-                                <thead>
-                                    <tr>
-                                        <th style="width: 25%;">PDF</th>
-                                        <th style="width: 15%;">Status</th>
-                                        <th style="width: 60%;">Lead Manager / Arranger</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="fileResultsTableBody">
-                                    <!-- Rows injected via JS -->
-                                </tbody>
-                            </table>
-                        </div>
-                    </div>
-                </form>
-            </div>
-
-            <!-- QUERY TAB -->
-            <div id="query" class="tab-content">
-                <h2 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 24px;">Query Your Knowledge Base</h2>
-                <form id="queryForm">
-                    <div class="form-group">
-                        <label for="queryText">Question *</label>
-                        <textarea id="queryText" placeholder="What would you like to know?" required></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="topK">Top Results</label>
-                        <input type="number" id="topK" min="1" max="50" value="6">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="queryIndexName">Index Name</label>
-                        <input type="text" id="queryIndexName" placeholder="rag-index" value="rag-index">
-                    </div>
-
-                    <div class="button-group">
-                        <button type="submit" class="btn-primary">Search & Generate Answer</button>
-                        <button type="reset" class="btn-secondary">Clear</button>
-                    </div>
-
-                    <div class="loading" id="queryLoading">
-                        <div class="spinner"></div>
-                        <p style="color: rgba(255, 255, 255, 0.7);">Finding answers...</p>
-                    </div>
-
-                    <div class="status-message" id="queryStatus"></div>
-
-                    <div class="response-container" id="queryResponse">
-                        <div class="response-card">
-                            <div class="response-title">Answer</div>
-                            <div class="response-text" id="answerText"></div>
-
-                            <div class="sources" id="sourcesContainer">
-                                <div class="sources-title">📚 Sources</div>
-                                <div id="sourcesList"></div>
-                            </div>
-                        </div>
-                    </div>
-                </form>
-            </div>
-
-            <!-- STRAPI TAB -->
-            <div id="strapi" class="tab-content">
-                <h2 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 24px;">Strapi Preset Questions</h2>
-                
-                <form id="strapiAnswerForm">
-                    <div class="form-group">
-                        <label for="strapiIndexName">Index Name</label>
-                        <input type="text" id="strapiIndexName" placeholder="rag-index" value="rag-index">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="strapiTopK">Top Results</label>
-                        <input type="number" id="strapiTopK" min="1" max="50" value="6">
-                    </div>
-
-                    <div class="form-group">
-                        <label for="strapiEmbedModel">Embedding Model</label>
-                        <select id="strapiEmbedModel">
-                            <option value="text-embedding-3-small">Small (Fast)</option>
-                            <option value="text-embedding-3-large">Large (Accurate)</option>
-                        </select>
-                    </div>
-
-                    <div class="button-group" style="margin-bottom: 30px;">
-                        <button type="button" class="btn-primary" onclick="fetchStrapiQuestions()">Fetch Questions Only</button>
-                        <button type="button" class="btn-primary" onclick="answerStrapiQuestions()">Fetch & Answer All Questions</button>
-                    </div>
-                </form>
-
-                <div class="loading" id="strapiLoading">
-                    <div class="spinner"></div>
-                    <p style="color: rgba(255, 255, 255, 0.7);">Processing Strapi questions...</p>
-                </div>
-
-                <div class="status-message" id="strapiStatus"></div>
-
-                <div class="response-container" id="strapiResponse">
-                    <div id="strapiQuestionsList"></div>
-                </div>
-            </div>
-
-            <!-- DEBUG TAB -->
-            <div id="debug" class="tab-content">
-                <h2 style="color: rgba(255, 255, 255, 0.9); margin-bottom: 24px;">System Status</h2>
                 <div class="form-group">
-                    <label for="debugIndexName">Index Name</label>
-                    <input type="text" id="debugIndexName" placeholder="rag-index" value="rag-index">
+                    <label>Select PDF Files</label>
+
+                    <input
+                        type="file"
+                        id="pdfFiles"
+                        accept=".pdf"
+                        multiple
+                        required
+                    />
                 </div>
 
-                <button type="button" class="btn-primary" onclick="checkDebug()">Check Status</button>
+                <button type="submit" class="btn-primary">
+                    Process PDFs
+                </button>
 
-                <div class="loading" id="debugLoading">
-                    <div class="spinner"></div>
-                    <p style="color: rgba(255, 255, 255, 0.7);">Fetching status...</p>
-                </div>
+                <button
+                    type="button"
+                    class="btn-success"
+                    id="downloadBtn"
+                    onclick="downloadExcel()"
+                >
+                    Download Excel
+                </button>
 
-                <div class="response-container" id="debugResponse">
-                    <div class="grid">
-                        <div class="stats-card">
-                            <div class="stats-number" id="indexStatus">-</div>
-                            <div class="stats-label">Index Status</div>
-                        </div>
-                        <div class="stats-card">
-                            <div class="stats-number" id="vectorCount">-</div>
-                            <div class="stats-label">Total Vectors</div>
-                        </div>
-                        <div class="stats-card">
-                            <div class="stats-number" id="dimensionCount">-</div>
-                            <div class="stats-label">Dimension</div>
-                        </div>
-                    </div>
+            </form>
 
-                    <div class="response-card" style="margin-top: 20px;">
-                        <div class="response-title">Detailed Information</div>
-                        <div id="debugDetails" style="color: rgba(255, 255, 255, 0.8); font-family: monospace; white-space: pre-wrap; word-break: break-all;"></div>
-                    </div>
-                </div>
+            <div class="loading" id="loading">
+
+                <div class="spinner"></div>
+
+                <p style="margin-top:20px;">
+                    Processing PDFs...
+                </p>
+
             </div>
+
+            <div class="status" id="status"></div>
+
+            <div class="table-container" id="tableContainer">
+
+                <table>
+
+                    <thead>
+                        <tr>
+                            <th>PDF</th>
+                            <th>Extracted Answers</th>
+                        </tr>
+                    </thead>
+
+                    <tbody id="resultsBody"></tbody>
+
+                </table>
+
+            </div>
+
         </div>
+
     </div>
 
     <script>
+
         const API_BASE = window.location.origin;
-        let globalIngestData = null; // Store data globally for Excel export
 
-        // Tab switching
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => {
-                document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-                document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-                btn.classList.add('active');
-                document.getElementById(btn.dataset.tab).classList.add('active');
-            });
-        });
+        let globalResults = [];
 
-        function showStatus(elementId, message, type) {
-            const el = document.getElementById(elementId);
-            el.textContent = message;
-            el.className = `status-message show ${type}`;
-            // Auto hide after 5 seconds for success/info, keep for errors
-            if(type !== 'error') {
-                setTimeout(() => el.classList.remove('show'), 5000);
-            }
+        function showStatus(message, type) {
+
+            const status = document.getElementById("status");
+
+            status.style.display = "block";
+
+            status.className = `status ${type}`;
+
+            status.innerHTML = message;
         }
 
-        // INGEST FORM
-        document.getElementById('ingestForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const pdfFiles = document.getElementById('pdfFiles').files;
-            const indexName = document.getElementById('indexName').value;
-            const embeddingModel = document.getElementById('embeddingModel').value;
+        document
+            .getElementById("uploadForm")
+            .addEventListener("submit", async (e) => {
 
-            if (pdfFiles.length === 0) {
-                showStatus('ingestStatus', 'Please select at least one PDF file', 'error');
-                return;
-            }
+                e.preventDefault();
 
-            const formData = new FormData();
-            for (let i = 0; i < pdfFiles.length; i++) {
-                formData.append('pdfs', pdfFiles[i]);
-            }
-            formData.append('index_name', indexName);
-            formData.append('embedding_model', embeddingModel);
+                const files =
+                    document.getElementById("pdfFiles").files;
 
-            document.getElementById('ingestLoading').style.display = 'block';
-            document.getElementById('ingestStatusText').textContent = `Processing ${pdfFiles.length} files and extracting answers...`;
-            document.getElementById('ingestResponse').classList.remove('show');
-            document.getElementById('downloadExcelBtn').style.display = 'none'; // Hide button during load
-            showStatus('ingestStatus', '', ''); // Clear previous status
+                if (files.length === 0) {
 
-            try {
-                const res = await fetch(`${API_BASE}/ingest`, {
-                    method: 'POST',
-                    body: formData
-                });
+                    showStatus(
+                        "Please upload PDFs",
+                        "error"
+                    );
 
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || 'Upload failed');
+                    return;
                 }
 
-                const data = await res.json();
-                globalIngestData = data; // Store for Excel
-                
-                // Clear previous table
-                const tbody = document.getElementById('fileResultsTableBody');
-                tbody.innerHTML = '';
-
-                if (data.results && data.results.length > 0) {
-                    data.results.forEach(file => {
-                        const row = document.createElement('tr');
-                        
-                        let statusHtml = '';
-                        if (file.status.includes('active')) {
-                            statusHtml = '<span class="status-badge status-active">Active</span>';
-                        } else if (file.status.includes('deleted')) {
-                            statusHtml = '<span class="status-badge status-deleted">Processed (Deleted)</span>';
-                        } else {
-                            statusHtml = `<span class="status-badge" style="background:rgba(239,68,68,0.2);color:#ef4444;">Error</span>`;
-                        }
-
-                        // Extract the answer for the single hardcoded question
-                        // Backend returns a list of QAs, we want the first one.
-                        let answerText = "N/A";
-                        if (file.qas && file.qas.length > 0) {
-                            answerText = file.qas[0].answer;
-                        } else if (file.status.includes('Error')) {
-                            answerText = file.status;
-                        } else {
-                            answerText = "No answer found";
-                        }
-
-                        row.innerHTML = `
-                            <td>
-                                <div class="filename-cell">${file.filename}</div>
-                                <div style="font-size: 0.8em; color: rgba(255,255,255,0.5);">${file.chunks} chunks</div>
-                            </td>
-                            <td>${statusHtml}</td>
-                            <td>${answerText}</td>
-                        `;
-                        tbody.appendChild(row);
-                    });
-                }
-
-                document.getElementById('ingestResponse').classList.add('show');
-                document.getElementById('downloadExcelBtn').style.display = 'inline-block'; // Show button
-                showStatus('ingestStatus', `✓ Processed ${data.total_files} files successfully!`, 'success');
-            } catch (err) {
-                showStatus('ingestStatus', `✗ ${err.message}`, 'error');
-            } finally {
-                document.getElementById('ingestLoading').style.display = 'none';
-            }
-        });
-
-        // EXCEL DOWNLOAD FUNCTION
-        function downloadExcel() {
-            if (!globalIngestData || !globalIngestData.results) {
-                // Replaced native alert with status message
-                showStatus('ingestStatus', '✗ No data available to export.', 'error');
-                return;
-            }
-
-            // Map data to specific columns: PDF and LeadManager/Arranger
-            const dataToExport = globalIngestData.results.map(file => {
-                // Access the first answer (index 0) which corresponds to the hardcoded question
-                let answer = "N/A";
-                if (file.qas && file.qas.length > 0) {
-                    answer = file.qas[0].answer;
-                }
-
-                return {
-                    "PDF": file.filename,
-                    "LeadManager/Arranger": answer
-                };
-            });
-
-            // Create worksheet
-            const ws = XLSX.utils.json_to_sheet(dataToExport);
-            
-            // Set column widths: PDF (40 chars), LeadManager/Arranger (60 chars)
-            const wscols = [
-                {wch: 40}, 
-                {wch: 60}
-            ];
-            ws['!cols'] = wscols;
-
-            // Create workbook
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "Extraction Results");
-
-            // Download file
-            XLSX.writeFile(wb, "Extraction_Results.xlsx");
-            
-            showStatus('ingestStatus', '✓ Excel file downloaded successfully.', 'success');
-        }
-
-        // QUERY FORM
-        document.getElementById('queryForm').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const query = document.getElementById('queryText').value;
-            const topK = parseInt(document.getElementById('topK').value);
-            const indexName = document.getElementById('queryIndexName').value;
-
-            document.getElementById('queryLoading').style.display = 'block';
-            document.getElementById('queryResponse').classList.remove('show');
-
-            try {
-                const res = await fetch(`${API_BASE}/query`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        query,
-                        top_k: topK,
-                        index_name: indexName
-                    })
-                });
-
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || 'Query failed');
-                }
-
-                const data = await res.json();
-                document.getElementById('answerText').textContent = data.answer;
-
-                const sourcesList = document.getElementById('sourcesList');
-                sourcesList.innerHTML = '';
-                if (data.sources.length > 0) {
-                    data.sources.forEach((source, i) => {
-                        const item = document.createElement('div');
-                        item.className = 'source-item';
-                        item.innerHTML = `<strong>Source ${i + 1}:</strong> Page ${source.page} (Score: ${(source.score * 100).toFixed(1)}%)`;
-                        sourcesList.appendChild(item);
-                    });
-                } else {
-                    sourcesList.innerHTML = '<div style="color: rgba(255, 255, 255, 0.5);">No sources found</div>';
-                }
-
-                document.getElementById('queryResponse').classList.add('show');
-            } catch (err) {
-                showStatus('queryStatus', `✗ ${err.message}`, 'error');
-            } finally {
-                document.getElementById('queryLoading').style.display = 'none';
-            }
-        });
-
-        // DEBUG CHECK
-        async function checkDebug() {
-            const indexName = document.getElementById('debugIndexName').value;
-            document.getElementById('debugLoading').style.display = 'block';
-            document.getElementById('debugResponse').classList.remove('show');
-
-            try {
-                const res = await fetch(`${API_BASE}/debug?index_name=${encodeURIComponent(indexName)}`);
-                const data = await res.json();
-
-                if (!data.exists) {
-                    document.getElementById('indexStatus').textContent = 'Not Found';
-                    document.getElementById('vectorCount').textContent = '0';
-                    document.getElementById('dimensionCount').textContent = '-';
-                } else {
-                    document.getElementById('indexStatus').textContent = '✓ Active';
-                    document.getElementById('vectorCount').textContent = data.total_vectors;
-                    document.getElementById('dimensionCount').textContent = data.dimension;
-                }
-
-                document.getElementById('debugDetails').textContent = JSON.stringify(data, null, 2);
-                document.getElementById('debugResponse').classList.add('show');
-            } catch (err) {
-                showStatus('debugStatus', `✗ ${err.message}`, 'error');
-            } finally {
-                document.getElementById('debugLoading').style.display = 'none';
-            }
-        }
-
-        // STRAPI QUESTIONS
-        async function fetchStrapiQuestions() {
-            document.getElementById('strapiLoading').style.display = 'block';
-            document.getElementById('strapiResponse').classList.remove('show');
-
-            try {
-                const res = await fetch(`${API_BASE}/strapi/questions`);
-                
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || 'Failed to fetch questions');
-                }
-
-                const data = await res.json();
-                const questionsList = document.getElementById('strapiQuestionsList');
-                questionsList.innerHTML = '';
-
-                if (data.questions && data.questions.length > 0) {
-                    data.questions.forEach((q, idx) => {
-                        const card = document.createElement('div');
-                        card.className = 'response-card';
-                        card.innerHTML = `
-                            <div class="response-title">Question ${idx + 1} (ID: ${q.id})</div>
-                            <div class="response-text">${q.question}</div>
-                        `;
-                        questionsList.appendChild(card);
-                    });
-                    
-                    document.getElementById('strapiResponse').classList.add('show');
-                    showStatus('strapiStatus', `✓ Fetched ${data.questions.length} questions from Strapi`, 'success');
-                } else {
-                    showStatus('strapiStatus', 'No questions found in Strapi', 'info');
-                }
-            } catch (err) {
-                showStatus('strapiStatus', `✗ ${err.message}`, 'error');
-            } finally {
-                document.getElementById('strapiLoading').style.display = 'none';
-            }
-        }
-
-        async function answerStrapiQuestions() {
-            const indexName = document.getElementById('strapiIndexName').value;
-            const topK = parseInt(document.getElementById('strapiTopK').value);
-            const embeddingModel = document.getElementById('strapiEmbedModel').value;
-
-            document.getElementById('strapiLoading').style.display = 'block';
-            document.getElementById('strapiResponse').classList.remove('show');
-
-            try {
                 const formData = new FormData();
-                formData.append('index_name', indexName);
-                formData.append('top_k', topK);
-                formData.append('embedding_model', embeddingModel);
-                formData.append('chat_model', 'gpt-4o-mini');
 
-                const res = await fetch(`${API_BASE}/strapi/answer-questions`, {
-                    method: 'POST',
-                    body: formData
+                for (let file of files) {
+
+                    formData.append("pdfs", file);
+                }
+
+                document
+                    .getElementById("loading")
+                    .style.display = "block";
+
+                document
+                    .getElementById("tableContainer")
+                    .style.display = "none";
+
+                document
+                    .getElementById("downloadBtn")
+                    .style.display = "none";
+
+                try {
+
+                    const response = await fetch(
+                        `${API_BASE}/ingest`,
+                        {
+                            method: "POST",
+                            body: formData
+                        }
+                    );
+
+                    if (!response.ok) {
+
+                        throw new Error(
+                            "Failed to process PDFs"
+                        );
+                    }
+
+                    const data = await response.json();
+
+                    globalResults = data.results;
+
+                    renderResults(globalResults);
+
+                    showStatus(
+                        `Successfully processed ${data.total_files} PDFs`,
+                        "success"
+                    );
+
+                } catch (err) {
+
+                    showStatus(
+                        err.message,
+                        "error"
+                    );
+
+                } finally {
+
+                    document
+                        .getElementById("loading")
+                        .style.display = "none";
+                }
+
+            });
+
+        function renderResults(results) {
+
+            const tbody =
+                document.getElementById("resultsBody");
+
+            tbody.innerHTML = "";
+
+            results.forEach(file => {
+
+                const row =
+                    document.createElement("tr");
+
+                let answersHtml = "";
+
+                file.qas.forEach(qa => {
+
+                    answersHtml += `
+                        <div class="answer-box">
+
+                            <div class="question">
+                                ${qa.question}
+                            </div>
+
+                            <div class="answer">
+                                ${qa.answer}
+                            </div>
+
+                        </div>
+                    `;
                 });
 
-                if (!res.ok) {
-                    const err = await res.json();
-                    throw new Error(err.detail || 'Failed to answer questions');
-                }
+                row.innerHTML = `
 
-                const data = await res.json();
-                const questionsList = document.getElementById('strapiQuestionsList');
-                questionsList.innerHTML = '';
+                    <td class="filename">
+                        ${file.filename}
+                    </td>
 
-                if (data.results && data.results.length > 0) {
-                    data.results.forEach((item, idx) => {
-                        const card = document.createElement('div');
-                        card.className = 'response-card';
-                        
-                        let sourcesHtml = '';
-                        if (item.sources && item.sources.length > 0) {
-                            sourcesHtml = '<div class="sources"><div class="sources-title">📚 Sources</div>';
-                            item.sources.forEach((source, i) => {
-                                sourcesHtml += `<div class="source-item"><strong>Source ${i + 1}:</strong> Page ${source.page} (Score: ${(source.score * 100).toFixed(1)}%)</div>`;
-                            });
-                            sourcesHtml += '</div>';
-                        }
-                        
-                        card.innerHTML = `
-                            <div class="response-title">Question ${idx + 1} (ID: ${item.id})</div>
-                            <div class="response-text"><strong>Q:</strong> ${item.question}</div>
-                            <div class="response-text" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid rgba(255, 255, 255, 0.1);">
-                                <strong style="color: #00d4ff;">A:</strong> ${item.answer}
-                            </div>
-                            ${sourcesHtml}
-                        `;
-                        questionsList.appendChild(card);
-                    });
-                    
-                    document.getElementById('strapiResponse').classList.add('show');
-                    showStatus('strapiStatus', `✓ Answered ${data.results.length} questions successfully!`, 'success');
-                } else {
-                    showStatus('strapiStatus', 'No questions to process', 'info');
-                }
-            } catch (err) {
-                showStatus('strapiStatus', `✗ ${err.message}`, 'error');
-            } finally {
-                document.getElementById('strapiLoading').style.display = 'none';
-            }
+                    <td>
+                        ${answersHtml}
+                    </td>
+                `;
+
+                tbody.appendChild(row);
+
+            });
+
+            document
+                .getElementById("tableContainer")
+                .style.display = "block";
+
+            document
+                .getElementById("downloadBtn")
+                .style.display = "inline-block";
         }
+
+        function downloadExcel() {
+
+            if (globalResults.length === 0) {
+
+                showStatus(
+                    "No results available",
+                    "error"
+                );
+
+                return;
+            }
+
+            const excelData = [];
+
+            globalResults.forEach(file => {
+
+                let row = {
+                    PDF: file.filename
+                };
+
+                file.qas.forEach(qa => {
+
+                    row[qa.question] = qa.answer;
+                });
+
+                excelData.push(row);
+            });
+
+            const worksheet =
+                XLSX.utils.json_to_sheet(excelData);
+
+            worksheet["!cols"] = [
+                { wch: 40 },
+                { wch: 50 },
+                { wch: 50 },
+                { wch: 50 },
+                { wch: 50 }
+            ];
+
+            const workbook =
+                XLSX.utils.book_new();
+
+            XLSX.utils.book_append_sheet(
+                workbook,
+                worksheet,
+                "Results"
+            );
+
+            XLSX.writeFile(
+                workbook,
+                "pdf_extraction_results.xlsx"
+            );
+
+            showStatus(
+                "Excel downloaded successfully",
+                "success"
+            );
+        }
+
     </script>
+
 </body>
+
 </html>
