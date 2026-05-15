@@ -1,72 +1,78 @@
 import os
 import io
+import json
 import uuid
 import math
-from typing import List, Dict, Any, Optional
 import logging
-import pdfplumber
-import httpx
-from fastapi import FastAPI, UploadFile, File, Form
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
-from fastapi import HTTPException
+from typing import List, Dict, Any, Optional
 from pathlib import Path
-from fastapi.responses import HTMLResponse
-from openai import OpenAI
-from pinecone import Pinecone, ServerlessSpec
+from concurrent.futures import ThreadPoolExecutor
+
+import pdfplumber
+import numpy as np
+import pandas as pd
+import faiss
+
 from dotenv import load_dotenv
+from openai import OpenAI
+
+from fastapi import (
+    FastAPI,
+    UploadFile,
+    File,
+    Form,
+    HTTPException,
+    Request
+)
+
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import (
+    HTMLResponse,
+    StreamingResponse,
+    FileResponse
+)
+
+from pydantic import BaseModel, Field
+
 load_dotenv()
 
-# ------------ LOGGING ------------
+# ---------------------------------------------------
+# LOGGING
+# ---------------------------------------------------
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("rag")
 
-# -------- ENV --------
+logger = logging.getLogger("faiss-rag")
+
+# ---------------------------------------------------
+# ENV
+# ---------------------------------------------------
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-PINECONE_API_KEY = os.getenv("PINECONE_API_KEY", "")
-PINECONE_CLOUD = os.getenv("PINECONE_CLOUD", "aws")
-PINECONE_REGION = os.getenv("PINECONE_REGION", "us-east-1")
-DEFAULT_INDEX_NAME = os.getenv("PINECONE_INDEX", "rag-index")
 
-DEFAULT_EMBED_MODEL = os.getenv("EMBEDDING_MODEL", "text-embedding-3-small")
-DEFAULT_CHAT_MODEL = os.getenv("CHAT_MODEL", "gpt-4o-mini")
-
-# Strapi API Configuration
-STRAPI_API_URL = "https://admin.equivision.in/api/preset-questions?pagination[pageSize]=100"
-STRAPI_BEARER_TOKEN = os.getenv(
-    "STRAPI_BEARER_TOKEN",
-    "7c95c5c490694a382a102afa60f7df7d64922a7e840719b2cd5803706e9fabdad8bc508f39fcdfef30df399141818dbb65b4b6ae82ba7a1befbccf27fbc3864f45b2bda0417d597d4db28ef893be167e4c2c314a54a6a9b0b901ed2a8569a51e394f423d39735fc77f02ce721db19a30360558c11bff03bb7e25b877f2eea0f4"
+DEFAULT_EMBED_MODEL = os.getenv(
+    "EMBEDDING_MODEL",
+    "text-embedding-3-small"
 )
 
-# HARDCODED QUESTIONS FOR PROCESSING
-HARDCODED_QUESTIONS = [
-    "Who is the arranger/lead manger?"
-]
-
-EMBED_DIMS = {
-    "text-embedding-3-small": 1536,
-    "text-embedding-3-large": 3072,
-}
-
-EMBED_ALIASES = {
-    "small": "text-embedding-3-small",
-    "large": "text-embedding-3-large",
-    "text-embedding-3-small": "text-embedding-3-small",
-    "text-embedding-3-large": "text-embedding-3-large",
-}
+DEFAULT_CHAT_MODEL = os.getenv(
+    "CHAT_MODEL",
+    "gpt-4o-mini"
+)
 
 if not OPENAI_API_KEY:
-    raise RuntimeError("Set OPENAI_API_KEY in environment.")
-if not PINECONE_API_KEY:
-    raise RuntimeError("Set PINECONE_API_KEY in environment.")
+    raise RuntimeError("OPENAI_API_KEY not found")
 
 oa_client = OpenAI(api_key=OPENAI_API_KEY)
-pc = Pinecone(api_key=PINECONE_API_KEY)
 
-app = FastAPI(title="Rag for equivision")
+# ---------------------------------------------------
+# FASTAPI
+# ---------------------------------------------------
+
+app = FastAPI(title="FAISS PDF Extraction API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -76,720 +82,538 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ------------ SCHEMAS ------------
-class QueryRequest(BaseModel):
-    query: str = Field(..., examples=["What is the listing date on the IPO?"])
-    top_k: int = Field(6, ge=1, le=50)
-    index_name: Optional[str] = Field(None, examples=[DEFAULT_INDEX_NAME])
-    embedding_model: Optional[str] = Field(
-        None,
-        description="Use 'text-embedding-3-small' | 'text-embedding-3-large' (or aliases 'small'|'large').",
-        examples=[DEFAULT_EMBED_MODEL],
-    )
-    chat_model: Optional[str] = Field(None, examples=[DEFAULT_CHAT_MODEL])
+# ---------------------------------------------------
+# QUESTIONS
+# ---------------------------------------------------
 
-# QA Schema for Hardcoded Answers
+HARDCODED_QUESTIONS = [
+    "Who is the arranger/lead manager?",
+]
+
+# ---------------------------------------------------
+# SCHEMAS
+# ---------------------------------------------------
+
 class QAItem(BaseModel):
     question: str
     answer: str
 
-class FileIngestResult(BaseModel):
+
+class FileResult(BaseModel):
     filename: str
-    doc_id: str
-    chunks: int
-    status: str  # "processed", "deleted_after_processing", "error"
-    qas: List[QAItem] # Answers to the hardcoded questions
-
-class BatchIngestResponse(BaseModel):
-    index_name: str
-    total_files: int
-    embedding_model: str
-    dimension: int
-    current_doc_id: Optional[str] 
-    results: List[FileIngestResult]
-
-class QueryResponse(BaseModel):
-    answer: str
-    sources: List[Dict[str, Any]]
-
-# batch models
-class BatchQueryItem(BaseModel):
-    query: str
-    top_k: int = 6
-    index_name: Optional[str] = None
-    embedding_model: Optional[str] = None
-    chat_model: Optional[str] = None
-
-class BatchQueryResponse(BaseModel):
-    results: List[QueryResponse]
-
-class StrapiQuestion(BaseModel):
-    id: int
-    question: str
-    answer: Optional[str] = None
-
-class StrapiQuestionsResponse(BaseModel):
-    questions: List[StrapiQuestion]
-
-class StrapiAnswersResponse(BaseModel):
-    results: List[Dict[str, Any]]
+    qas: List[QAItem]
 
 
+# ---------------------------------------------------
+# PDF CHUNKING
+# ---------------------------------------------------
 
-# ------------ UTILS ------------
-def normalize_embed_model(maybe: Optional[str]) -> str:
-    if not maybe:
-        return DEFAULT_EMBED_MODEL
-    m = str(maybe).strip().lower()
-    if m in {"string", "none", "null", ""}:
-        return DEFAULT_EMBED_MODEL
-    return EMBED_ALIASES.get(m, DEFAULT_EMBED_MODEL if m not in EMBED_DIMS else m)
+def extract_pdf_text_chunks(
+    pdf_bytes: bytes,
+    max_tokens: int = 800,
+    overlap: int = 150
+) -> List[Dict[str, Any]]:
 
-
-def ensure_index(index_name: str, embedding_model: str):
-    if embedding_model not in EMBED_DIMS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Unsupported embedding model '{embedding_model}'. Use one of: {list(EMBED_DIMS.keys())}",
-        )
-
-    required_dim = EMBED_DIMS[embedding_model]
-    existing = {idx["name"] for idx in pc.list_indexes()}
-
-    if index_name in existing:
-        desc = pc.describe_index(index_name)
-        actual_dim = None
-        try:
-            actual_dim = int(getattr(desc, "dimension"))
-        except Exception:
-            try:
-                actual_dim = int(desc.to_dict().get("dimension"))
-            except Exception:
-                pass
-
-        if actual_dim is not None and actual_dim != required_dim:
-            logger.warning(
-                f"Index '{index_name}' has dim {actual_dim}, but model '{embedding_model}' needs {required_dim}. "
-                f"Recreating index…"
-            )
-            pc.delete_index(index_name)
-            pc.create_index(
-                name=index_name,
-                dimension=required_dim,
-                metric="cosine",
-                spec=ServerlessSpec(cloud=PINECONE_CLOUD, region=PINECONE_REGION),
-            )
-            logger.info(f"Recreated index '{index_name}' with dim {required_dim}.")
-    else:
-        logger.info(f"Creating index '{index_name}' with dim {required_dim}…")
-        pc.create_index(
-            name=index_name,
-            dimension=required_dim,
-            metric="cosine",
-            spec=ServerlessSpec(cloud=PINECONE_CLOUD, region=PINECONE_REGION),
-        )
-        logger.info(f"Index '{index_name}' created.")
-
-    return pc.Index(index_name), required_dim
-
-def extract_pdf_text_chunks(pdf_bytes: bytes,
-                            max_tokens: int = 1500,
-                            overlap: int = 150) -> List[Dict[str, Any]]:
     approx_chars = max_tokens * 4
     approx_overlap = overlap * 4
-    chunks: List[Dict[str, Any]] = []
+
+    chunks = []
 
     with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-        logger.info(f"PDF opened. Total pages: {len(pdf.pages)}")
+
+        logger.info(f"Pages: {len(pdf.pages)}")
+
         for pageno, page in enumerate(pdf.pages, start=1):
+
             text = (page.extract_text() or "").strip()
-            if not text:
-                words = page.extract_words() or []
-                if words:
-                    text = " ".join(w.get("text", "") for w in words).strip()
 
             if not text:
                 continue
 
             start = 0
             n = len(text)
+
             while start < n:
+
                 end = min(start + approx_chars, n)
+
                 snippet = text[start:end].strip()
+
                 if snippet:
-                    chunks.append({"page": pageno, "text": snippet})
-                    if len(chunks) % 100 == 0:
-                        logger.info(f"chunking... {len(chunks)}")
+                    chunks.append({
+                        "page": pageno,
+                        "text": snippet
+                    })
+
                 if end >= n:
                     break
+
                 start = max(0, end - approx_overlap)
 
-    logger.info(f"chunking done. total chunks: {len(chunks)}")
+    logger.info(f"Total chunks: {len(chunks)}")
+
     return chunks
 
+# ---------------------------------------------------
+# EMBEDDINGS
+# ---------------------------------------------------
 
-def embed_texts(texts: List[str], model: str) -> List[List[float]]:
-    out: List[List[float]] = []
-    batch_size = 128
+def embed_texts(
+    texts: List[str],
+    model: str
+) -> List[List[float]]:
+
+    all_embeddings = []
+
+    batch_size = 100
+
     total = len(texts)
+
     total_batches = math.ceil(total / batch_size)
+
     for i in range(0, total, batch_size):
+
         batch = texts[i:i + batch_size]
+
         batch_no = i // batch_size + 1
-        logger.info(f"embedding batch {batch_no}/{total_batches} (size {len(batch)})...")
-        resp = oa_client.embeddings.create(model=model, input=batch)
-        out.extend([d.embedding for d in resp.data])
-    logger.info("embedding done.")
-    return out
+
+        logger.info(
+            f"Embedding batch "
+            f"{batch_no}/{total_batches}"
+        )
+
+        response = oa_client.embeddings.create(
+            model=model,
+            input=batch
+        )
+
+        all_embeddings.extend(
+            [d.embedding for d in response.data]
+        )
+
+    return all_embeddings
+
+# ---------------------------------------------------
+# FAISS
+# ---------------------------------------------------
+
+def create_faiss_index(
+    embeddings: List[List[float]]
+):
+
+    vectors = np.array(
+        embeddings,
+        dtype=np.float32
+    )
+
+    dimension = vectors.shape[1]
+
+    index = faiss.IndexFlatL2(dimension)
+
+    index.add(vectors)
+
+    return index
 
 
-def upsert_chunks_to_pinecone(index, doc_id: str, chunks: List[Dict[str, Any]],
-                              embeddings: List[List[float]]) -> List[str]:
-    """Returns list of vector IDs created"""
-    vectors = []
-    vector_ids = []
-    for i, (chunk, emb) in enumerate(zip(chunks, embeddings)):
-        v_id = f"{doc_id}-{i}"
-        vector_ids.append(v_id)
-        vectors.append({
-            "id": v_id,
-            "values": emb,
-            "metadata": {
-                "doc_id": doc_id,
-                "page": chunk["page"],
-                "text": chunk["text"][:4000],
-            }
+def search_faiss(
+    index,
+    query_embedding,
+    chunks,
+    top_k=6
+):
+
+    query_vector = np.array(
+        [query_embedding],
+        dtype=np.float32
+    )
+
+    distances, indices = index.search(
+        query_vector,
+        top_k
+    )
+
+    results = []
+
+    for idx, distance in zip(
+        indices[0],
+        distances[0]
+    ):
+
+        if idx == -1:
+            continue
+
+        chunk = chunks[idx]
+
+        results.append({
+            "id": str(idx),
+            "score": float(distance),
+            "text": chunk["text"],
+            "page": chunk["page"]
         })
 
-    batch = 200
-    total = len(vectors)
-    total_batches = math.ceil(total / batch)
-    for i in range(0, total, batch):
-        batch_no = i // batch + 1
-        logger.info(f"upserting vectors {batch_no}/{total_batches} ...")
-        index.upsert(vectors=vectors[i:i + batch])
-    logger.info("upsert done.")
-    return vector_ids
+    return results
 
+# ---------------------------------------------------
+# PROMPT
+# ---------------------------------------------------
 
-def search(index, query_embedding: List[float], top_k: int = 6):
-    res = index.query(
-        vector=query_embedding,
-        top_k=top_k,
-        include_values=False,
-        include_metadata=True,
-    )
-    matches = getattr(res, "matches", []) or []
-    return [
-        {
-            "id": m.id,
-            "score": getattr(m, "score", None),
-            "text": (m.metadata or {}).get("text", ""),
-            "page": (m.metadata or {}).get("page"),
-            "doc_id": (m.metadata or {}).get("doc_id"),
-        }
-        for m in matches
-    ]
-
-
-def build_prompt(query: str, contexts: List[Dict[str, Any]]) -> str:
-    bullets = []
-    for c in contexts:
-        page = c.get("page")
-        text = c.get("text", "")
-        bullets.append(f"(p.{page}) {text}")
-
-    context_block = "\n\n".join(bullets[:10])
-
-    return (
-        "You are an information extraction assistant.\n"
-        "Answer using ONLY the exact value present in the context.\n"
-        "Do NOT write explanatory sentences.\n"
-        "Do NOT repeat the question.\n"
-        "Do NOT prefix the answer with labels like 'The answer is'.\n"
-        "Return only the direct extracted entity, name, number, or phrase.\n"
-        "If the answer is not present in the context, return exactly: Not found\n\n"
-        f"Question:\n{query}\n\n"
-        f"Context:\n{context_block}\n\n"
-        "Answer:"
-    )
-
-def generate_answer_internal(index, query: str, embedding_model: str, chat_model: str, top_k: int = 6) -> str:
-    """Helper function to query and generate answer without returning full source metadata"""
-    try:
-        q_emb = oa_client.embeddings.create(model=embedding_model, input=[query]).data[0].embedding
-    except Exception as e:
-        logger.error(f"Embedding error for internal query: {e}")
-        return "Error generating embedding"
-
-    try:
-        matches = search(index, q_emb, top_k=top_k)
-    except Exception as e:
-        logger.error(f"Pinecone query error for internal query: {e}")
-        return "Error querying database"
-
-    if not matches:
-        return "I don't have enough information to answer from the knowledge base."
-
-    prompt = build_prompt(query, matches)
-
-    try:
-        chat = oa_client.chat.completions.create(
-            model=chat_model,
-            messages=[
-                {"role": "system", "content": "You are a concise expert assistant."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.2,
-        )
-        return chat.choices[0].message.content.strip()
-    except Exception as e:
-        logger.error(f"Chat error for internal query: {e}")
-        return "Error generating answer"
-
-def safe_clear_index(index, namespace: str = "") -> None:
-    try:
-        stats = index.describe_index_stats()
-        ns_total = (
-            stats.get("namespaces", {})
-                 .get(namespace or "", {})
-                 .get("vector_count", 0)
-        )
-        if ns_total and ns_total > 0:
-            logger.info(f"clearing namespace '{namespace}' with {ns_total} vectors...")
-            index.delete(delete_all=True, namespace=namespace or "")
-            logger.info("namespace cleared.")
-        else:
-            logger.info("namespace empty, nothing to clear.")
-    except Exception as e:
-        msg = str(e)
-        if ("Namespace not found" in msg) or ("404" in msg):
-            logger.warning("namespace not found, continuing.")
-            return
-        raise HTTPException(status_code=500, detail=f"Failed to clear index: {e}")
-
-
-# ------------ ENDPOINTS ------------
-@app.post("/ingest", response_model=BatchIngestResponse)
-async def ingest_pdfs(
-    pdfs: List[UploadFile] = File(...), 
-    index_name: str = Form(DEFAULT_INDEX_NAME),
-    embedding_model: str = Form(DEFAULT_EMBED_MODEL),
+def build_prompt(
+    query,
+    contexts
 ):
-    if not pdfs:
-        raise HTTPException(status_code=400, detail="No files provided.")
 
-    for pdf in pdfs:
-        if not pdf.filename.lower().endswith(".pdf"):
-            raise HTTPException(status_code=400, detail=f"File '{pdf.filename}' is not a .pdf file.")
+    context_text = "\n\n".join([
+        f"(Page {c['page']}) {c['text']}"
+        for c in contexts
+    ])
 
-    embedding_model = normalize_embed_model(embedding_model)
-    chat_model = DEFAULT_CHAT_MODEL
-    logger.info(f"/ingest called. index={index_name}, embed_model={embedding_model}, files={len(pdfs)}")
+    return f"""
+You are an information extraction assistant.
 
-    index, dim = ensure_index(index_name, embedding_model)
+Rules:
+- Return ONLY the exact answer
+- No explanations
+- No extra text
+- If answer not found return exactly:
+Not found
 
-    # Clear everything initially to start fresh
-    safe_clear_index(index, namespace="")
+Question:
+{query}
 
-    results: List[FileIngestResult] = []
-    final_doc_id = None
-    vector_ids_to_delete = []
+Context:
+{context_text}
 
-    total_files = len(pdfs)
+Answer:
+"""
 
-    for i, pdf in enumerate(pdfs):
-        logger.info(f"Processing file {i+1}/{total_files}: {pdf.filename}")
-        
-        # Delete previous file's chunks if it exists and it's not the first run
-        if i > 0 and vector_ids_to_delete:
-            logger.info(f"Deleting previous chunks (count: {len(vector_ids_to_delete)}) to save storage...")
-            try:
-                index.delete(ids=vector_ids_to_delete)
-                logger.info("Previous chunks deleted successfully.")
-                # Update status of the previous result to indicate deletion
-                if i - 1 < len(results):
-                    results[i-1].status = "deleted_after_processing"
-            except Exception as e:
-                logger.error(f"Error deleting previous chunks: {e}")
+# ---------------------------------------------------
+# ANSWER GENERATION
+# ---------------------------------------------------
 
-        content = await pdf.read()
-        try:
-            chunks = extract_pdf_text_chunks(content, max_tokens=1500, overlap=150)
-        except Exception as e:
-            logger.error(f"Error extracting text from {pdf.filename}: {e}")
-            results.append(FileIngestResult(filename=pdf.filename, doc_id="", chunks=0, status=f"Error: {str(e)}", qas=[]))
-            continue
+def generate_answer(
+    faiss_index,
+    chunks,
+    question,
+    embedding_model,
+    chat_model,
+    top_k=6
+):
 
-        if not chunks:
-            logger.warning(f"No text extracted from {pdf.filename}")
-            results.append(FileIngestResult(filename=pdf.filename, doc_id="", chunks=0, status="No text extracted", qas=[]))
-            continue
+    try:
 
-        doc_id = str(uuid.uuid4())
-        texts = [c["text"] for c in chunks]
-        embeddings = embed_texts(texts, model=embedding_model)
-        
-        # Upsert and get the list of vector IDs created
-        vector_ids = upsert_chunks_to_pinecone(index, doc_id, chunks, embeddings)
-        
-        # *** NEW: ANSWER HARDCODED QUESTIONS ***
-        logger.info(f"Answering {len(HARDCODED_QUESTIONS)} hardcoded questions for {pdf.filename}...")
-        qa_results = []
-        for q in HARDCODED_QUESTIONS:
-            ans = generate_answer_internal(index, q, embedding_model, chat_model)
-            qa_results.append(QAItem(question=q, answer=ans))
-        
-        # Store current IDs to be deleted in next iteration
-        vector_ids_to_delete = vector_ids
-        final_doc_id = doc_id
+        q_embedding = oa_client.embeddings.create(
+            model=embedding_model,
+            input=[question]
+        ).data[0].embedding
 
-        status_msg = "processed_active"
-        
-        results.append(FileIngestResult(
-            filename=pdf.filename,
-            doc_id=doc_id,
-            chunks=len(chunks),
-            status=status_msg,
-            qas=qa_results # Include the Q&A results
-        ))
+    except Exception as e:
 
-    logger.info(f"Batch ingest complete. Total processed: {len(results)}")
+        logger.error(f"Embedding error: {e}")
 
-    return BatchIngestResponse(
-        index_name=index_name,
-        total_files=total_files,
-        embedding_model=embedding_model,
-        dimension=dim,
-        current_doc_id=final_doc_id,
-        results=results
+        return "Embedding Error"
+
+    matches = search_faiss(
+        faiss_index,
+        q_embedding,
+        chunks,
+        top_k=top_k
     )
 
-
-@app.post("/query", response_model=QueryResponse)
-async def query_knowledge(req: QueryRequest):
-    index_name = (req.index_name or DEFAULT_INDEX_NAME).strip() or DEFAULT_INDEX_NAME
-    embedding_model = normalize_embed_model(req.embedding_model)
-    chat_model = (req.chat_model or DEFAULT_CHAT_MODEL).strip() or DEFAULT_CHAT_MODEL
-
-    logger.info(f"/query called. q='{req.query[:60]}...' index={index_name}")
-
-    index, _ = ensure_index(index_name, embedding_model)
-
-    try:
-        q_emb = oa_client.embeddings.create(model=embedding_model, input=[req.query]).data[0].embedding
-    except Exception as e:
-        logger.error(f"Embedding error: {e}")
-        raise HTTPException(status_code=500, detail=f"Embedding error: {e}")
-
-    try:
-        matches = search(index, q_emb, top_k=req.top_k)
-    except Exception as e:
-        logger.error(f"Pinecone query error: {e}")
-        raise HTTPException(status_code=500, detail=f"Pinecone query error: {e}")
-
     if not matches:
-        logger.info("no matches found.")
-        return QueryResponse(
-            answer="I don't have enough information to answer from the knowledge base.",
-            sources=[]
-        )
+        return "Not found"
 
-    prompt = build_prompt(req.query, matches)
+    prompt = build_prompt(
+        question,
+        matches
+    )
 
     try:
-        chat = oa_client.chat.completions.create(
+
+        response = oa_client.chat.completions.create(
             model=chat_model,
             messages=[
-                {"role": "system", "content": "You are a concise expert assistant."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content":
+                    "You are a concise extraction assistant."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
             ],
-            temperature=0.2,
+            temperature=0.2
         )
-        answer = chat.choices[0].message.content.strip()
+
+        return response.choices[0].message.content.strip()
+
     except Exception as e:
+
         logger.error(f"Chat error: {e}")
-        raise HTTPException(status_code=500, detail=f"Chat error: {e}")
 
-    sources = [{"id": m["id"], "page": m["page"], "score": m["score"], "doc_id": m["doc_id"]} for m in matches]
-    logger.info("query answered.")
-    return QueryResponse(answer=answer, sources=sources)
+        return "Chat Error"
 
+# ---------------------------------------------------
+# PROCESS SINGLE PDF
+# ---------------------------------------------------
 
-@app.post("/query/batch", response_model=BatchQueryResponse)
-async def batch_query(payload: List[BatchQueryItem]):
-    logger.info(f"/query/batch called. total_queries={len(payload)}")
-    results: List[QueryResponse] = []
+def process_single_pdf(
+    pdf_bytes,
+    filename,
+    embedding_model,
+    chat_model
+):
 
-    for idx, item in enumerate(payload, start=1):
-        logger.info(f"processing query {idx}/{len(payload)}: '{item.query[:50]}...'")
-        index_name = (item.index_name or DEFAULT_INDEX_NAME).strip() or DEFAULT_INDEX_NAME
-        embedding_model = normalize_embed_model(item.embedding_model)
-        chat_model = (item.chat_model or DEFAULT_CHAT_MODEL).strip() or DEFAULT_CHAT_MODEL
+    logger.info(f"Processing: {filename}")
 
-        try:
-            index, _ = ensure_index(index_name, embedding_model)
+    chunks = extract_pdf_text_chunks(pdf_bytes)
 
-            q_emb = oa_client.embeddings.create(model=embedding_model, input=[item.query]).data[0].embedding
-            matches = search(index, q_emb, top_k=item.top_k)
+    if not chunks:
 
-            if not matches:
-                logger.info(f"query {idx}: no matches found.")
-                results.append(
-                    QueryResponse(answer="I don't have enough information to answer from the knowledge base.", sources=[])
-                )
-                continue
+        return {
+            "filename": filename,
+            "qas": []
+        }
 
-            prompt = build_prompt(item.query, matches)
+    texts = [c["text"] for c in chunks]
 
-            chat = oa_client.chat.completions.create(
-                model=chat_model,
-                messages=[
-                    {"role": "system", "content": "Answer strictly from the provided context. If the answer is not present, say you don't have enough information"},
-                    {"role": "user", "content": prompt}
-                ],
-                temperature=0.2,
-            )
-            answer = chat.choices[0].message.content.strip()
-            sources = [
-                {"id": m["id"], "page": m["page"], "score": m["score"], "doc_id": m["doc_id"]}
-                for m in matches
-            ]
-            results.append(QueryResponse(answer=answer, sources=sources))
-            logger.info(f"query {idx} answered.")
-        except Exception as e:
-            logger.error(f"Error in query {idx}: {e}")
-            results.append(
-                QueryResponse(
-                    answer=f"Error processing this query: {e}",
-                    sources=[]
-                )
-            )
+    embeddings = embed_texts(
+        texts,
+        embedding_model
+    )
 
-    logger.info("batch query complete.")
-    return BatchQueryResponse(results=results)
+    faiss_index = create_faiss_index(
+        embeddings
+    )
 
+    qas = []
 
-@app.get("/debug")
-def debug(index_name: str = DEFAULT_INDEX_NAME):
-    if index_name not in {idx["name"] for idx in pc.list_indexes()}:
-        return {"index": index_name, "exists": False}
+    for question in HARDCODED_QUESTIONS:
 
-    desc = pc.describe_index(index_name)
-    idx = pc.Index(index_name)
-    stats = idx.describe_index_stats()
-    total = int(stats.get("total_vector_count", 0))
+        answer = generate_answer(
+            faiss_index,
+            chunks,
+            question,
+            embedding_model,
+            chat_model
+        )
 
-    sample_query = "test"
-    try:
-        q_emb = oa_client.embeddings.create(model=DEFAULT_EMBED_MODEL, input=[sample_query]).data[0].embedding
-        test_matches = search(idx, q_emb, top_k=1)
-    except Exception as e:
-        test_matches = [{"error": str(e)}]
+        qas.append({
+            "question": question,
+            "answer": answer
+        })
 
     return {
-        "index": index_name,
-        "exists": True,
-        "dimension": int(getattr(desc, "dimension", -1)),
-        "metric": getattr(desc, "metric", None),
-        "total_vectors": total,
-        "test_query_matches": test_matches,
+        "filename": filename,
+        "qas": qas
     }
 
+# ---------------------------------------------------
+# INGEST + ANSWER
+# ---------------------------------------------------
 
-@app.get("/strapi/questions", response_model=StrapiQuestionsResponse)
-async def fetch_strapi_questions():
-    """
-    Fetch preset questions from Strapi API
-    """
-    logger.info("Fetching questions from Strapi API...")
-    
-    try:
-        async with httpx.AsyncClient() as client:
-            headers = {
-                "Authorization": f"Bearer {STRAPI_BEARER_TOKEN}"
-            }
-            response = await client.get(STRAPI_API_URL, headers=headers, timeout=30.0)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            questions = []
-            if isinstance(data, dict) and "data" in data:
-                for item in data["data"]:
-                    if isinstance(item, dict):
-                        attributes = item.get("attributes", {})
-                        questions.append(StrapiQuestion(
-                            id=item.get("id", 0),
-                            question=attributes.get("question", ""),
-                            answer=None
-                        ))
-            elif isinstance(data, list):
-                for idx, item in enumerate(data):
-                    if isinstance(item, dict):
-                        questions.append(StrapiQuestion(
-                            id=item.get("id", idx),
-                            question=item.get("question", ""),
-                            answer=None
-                        ))
-            
-            logger.info(f"Parsed {len(questions)} questions from Strapi")
-            return StrapiQuestionsResponse(questions=questions)
-            
-    except httpx.HTTPError as e:
-        logger.error(f"HTTP error fetching Strapi questions: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch questions from Strapi: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error fetching Strapi questions: {e}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
-
-
-@app.post("/strapi/answer-questions", response_model=StrapiAnswersResponse)
-async def answer_strapi_questions(
-    index_name: str = Form(DEFAULT_INDEX_NAME),
-    embedding_model: str = Form(DEFAULT_EMBED_MODEL),
-    chat_model: str = Form(DEFAULT_CHAT_MODEL),
-    top_k: int = Form(6)
+@app.post("/ingest")
+async def ingest_pdfs(
+    pdfs: List[UploadFile] = File(...)
 ):
-    """
-    Fetch questions from Strapi and generate answers using RAG
-    """
-    logger.info("Fetching questions from Strapi and generating answers...")
 
-    try:
-        async with httpx.AsyncClient() as client:
-            headers = {
-                "Authorization": f"Bearer {STRAPI_BEARER_TOKEN}"
-            }
-            response = await client.get(STRAPI_API_URL, headers=headers, timeout=30.0)
-            response.raise_for_status()
+    results = []
 
-            data = response.json()
-            raw_items = data.get("data", data)  # handle both {"data": [...]} and plain list
-            logger.info(f"Strapi raw items received: {len(raw_items) if isinstance(raw_items, list) else 0}")
+    for pdf in pdfs:
 
-            questions = []
+        if not pdf.filename.lower().endswith(".pdf"):
+            continue
 
-            if isinstance(raw_items, list):
-                for idx, item in enumerate(raw_items):
-                    if not isinstance(item, dict):
-                        continue
+        pdf_bytes = await pdf.read()
 
-                    # 1) Strapi style: item["attributes"]["question"]
-                    attributes = item.get("attributes")
-                    if isinstance(attributes, dict) and attributes.get("question"):
-                        questions.append({
-                            "id": item.get("id", idx),
-                            "question": attributes.get("question")
-                        })
-                        continue
+        result = process_single_pdf(
+            pdf_bytes,
+            pdf.filename,
+            DEFAULT_EMBED_MODEL,
+            DEFAULT_CHAT_MODEL
+        )
 
-                    # 2) Your current style: item["question"] at root
-                    if item.get("question"):
-                        questions.append({
-                            "id": item.get("id", idx),
-                            "question": item.get("question")
-                        })
-                        continue
-            else:
-                logger.warning("Strapi response not in expected list format")
+        results.append(result)
 
-            if not questions:
-                logger.info("No questions found in Strapi response")
-                return StrapiAnswersResponse(results=[])
+    return {
+        "total_files": len(results),
+        "results": results
+    }
 
-            # Normalize inputs
-            index_name = index_name.strip() or DEFAULT_INDEX_NAME
-            embedding_model = normalize_embed_model(embedding_model)
-            chat_model = chat_model.strip() or DEFAULT_CHAT_MODEL
+@app.post("/ingest-stream")
+async def ingest_pdfs_stream(
+    pdfs: List[UploadFile] = File(...)
+):
 
-            # ensure index
-            index, _ = ensure_index(index_name, embedding_model)
+    # Read files BEFORE StreamingResponse starts
+    pdf_data = []
 
-            results = []
-            total_q = len(questions)
-            for idx, q_item in enumerate(questions, start=1):
-                question_text = q_item["question"]
-                question_id = q_item["id"]
-                print("question_text:", question_text)
-                logger.info(f"Processing question {idx}/{total_q}: '{question_text[:80]}'")
+    for pdf in pdfs:
 
-                try:
-                    # embed question
-                    q_emb = oa_client.embeddings.create(
-                        model=embedding_model,
-                        input=[question_text]
-                    ).data[0].embedding
+        if pdf.filename.lower().endswith(".pdf"):
 
-                    # vector search
-                    matches = search(index, q_emb, top_k=top_k)
+            pdf_bytes = await pdf.read()
 
-                    if not matches:
-                        results.append({
-                            "id": question_id,
-                            "question": question_text,
-                            "answer": "I don't have enough information to answer from the knowledge base.",
-                            "sources": []
-                        })
-                        continue
+            pdf_data.append({
+                "filename": pdf.filename,
+                "bytes": pdf_bytes
+            })
 
-                    # build prompt
-                    prompt = build_prompt(question_text, matches)
+    async def event_generator():
 
-                    chat = oa_client.chat.completions.create(
-                        model=chat_model,
-                        messages=[
-                            {"role": "system", "content": "You are a concise expert assistant."},
-                            {"role": "user", "content": prompt}
-                        ],
-                        temperature=0.2,
-                    )
-                    answer = chat.choices[0].message.content.strip()
+        results = []
 
-                    sources = [
-                        {
-                            "id": m.get("id"),
-                            "page": m.get("page"),
-                            "score": m.get("score"),
-                            "doc_id": m.get("doc_id")
-                        }
-                        for m in matches
-                    ]
+        total = len(pdf_data)
 
-                    results.append({
-                        "id": question_id,
-                        "question": question_text,
-                        "answer": answer,
-                        "sources": sources
-                    })
+        for index, pdf in enumerate(pdf_data, start=1):
 
-                except Exception as e:
-                    logger.error(f"Error processing question {idx}: {e}")
-                    results.append({
-                        "id": question_id,
-                        "question": question_text,
-                        "answer": f"Error processing this question: {str(e)}",
-                        "sources": []
-                    })
+            filename = pdf["filename"]
 
-            logger.info(f"Completed processing {len(results)} questions")
-            return StrapiAnswersResponse(results=results)
+            # Live progress
+            yield f"data: {json.dumps({
+                'progress': index,
+                'total': total,
+                'filename': filename
+            })}\n\n"
 
-    except httpx.HTTPError as e:
-        logger.error(f"HTTP error fetching Strapi questions: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to fetch questions from Strapi: {str(e)}")
-    except Exception as e:
-        logger.error(f"Error in answer_strapi_questions: {e}")
-        raise HTTPException(status_code=500, detail=f"Error: {str(e)}")
+            try:
 
+                result = process_single_pdf(
+                    pdf["bytes"],
+                    filename,
+                    DEFAULT_EMBED_MODEL,
+                    DEFAULT_CHAT_MODEL
+                )
+
+                results.append(result)
+
+                # Send result instantly
+                yield f"data: {json.dumps({
+                    'done_file': True,
+                    'result': result,
+                    'progress': index,
+                    'total': total
+                })}\n\n"
+
+            except Exception as e:
+
+                logger.exception(e)
+
+                yield f"data: {json.dumps({
+                    'error': str(e),
+                    'filename': filename
+                })}\n\n"
+
+        # Final completion
+        yield f"data: {json.dumps({
+            'complete': True,
+            'results': results,
+            'total_files': total
+        })}\n\n"
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive"
+        }
+    )
+# ---------------------------------------------------
+# EXPORT EXCEL
+# ---------------------------------------------------
+
+@app.post("/export-excel")
+async def export_excel(
+    pdfs: List[UploadFile] = File(...)
+):
+
+    excel_rows = []
+
+    for pdf in pdfs:
+
+        if not pdf.filename.lower().endswith(".pdf"):
+            continue
+
+        logger.info(f"Excel processing: {pdf.filename}")
+
+        pdf_bytes = await pdf.read()
+
+        result = process_single_pdf(
+            pdf_bytes,
+            pdf.filename,
+            DEFAULT_EMBED_MODEL,
+            DEFAULT_CHAT_MODEL
+        )
+
+        row = {
+            "filename": result["filename"]
+        }
+
+        for qa in result["qas"]:
+
+            row[qa["question"]] = qa["answer"]
+
+        excel_rows.append(row)
+
+    df = pd.DataFrame(excel_rows)
+
+    output = io.BytesIO()
+
+    with pd.ExcelWriter(
+        output,
+        engine="openpyxl"
+    ) as writer:
+
+        df.to_excel(
+            writer,
+            index=False
+        )
+
+    output.seek(0)
+
+    return StreamingResponse(
+        output,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument"
+            ".spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition":
+            "attachment; filename=answers.xlsx"
+        }
+    )
+
+# ---------------------------------------------------
+# HEALTH
+# ---------------------------------------------------
 
 @app.get("/health")
 def health():
-    return {"status": "ok"}
 
+    return {
+        "status": "ok"
+    }
+
+# ---------------------------------------------------
+# FRONTEND
+# ---------------------------------------------------
 
 @app.get("/", response_class=HTMLResponse)
 def serve_frontend():
+
     file_path = Path(__file__).parent / "rag.html"
-    with open(file_path, "r", encoding="utf-8") as f:
+
+    if not file_path.exists():
+        return """
+        <h1>FAISS PDF Extraction API</h1>
+        <p>Backend running successfully.</p>
+        """
+
+    with open(
+        file_path,
+        "r",
+        encoding="utf-8"
+    ) as f:
+
         return f.read()
